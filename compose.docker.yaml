@@ -1,0 +1,30 @@
+# Docker Compose overlay for `docker compose -f compose.yaml -f compose.docker.yaml`.
+# compose.yaml requests Podman CDI devices (`nvidia.com/gpu=all`), which Docker
+# Compose does not accept. This file replaces those devices with `gpus: all`.
+# `scripts/deploy.py` adds it when CONTAINER_RUNTIME resolves to docker and the
+# CPU overlay is not in use. CPU fallback stacks compose.cpu.yaml and
+# compose.docker.cpu.yaml, which drops the GPU reservation.
+# Masquerade stays off so publish-net cannot open outbound connections.
+# Podman uses compose.podman.yaml; it rejects this Docker option.
+
+networks:
+  publish-net:
+    driver_opts:
+      com.docker.network.bridge.enable_ip_masquerade: "false"
+
+services:
+  llm:
+    devices: !override []
+    gpus: all
+
+  embedder:
+    devices: !override []
+    gpus: all
+
+  reranker:
+    devices: !override []
+    gpus: all
+
+  trainer:
+    devices: !override []
+    gpus: all

@@ -1,0 +1,50 @@
+# containers/agent/Containerfile
+#
+# Builds the `agent` FastAPI orchestrator service: RAG over Qdrant, an
+# OpenAI-compatible tool-calling loop against `llm`, and tool execution
+# against the `tools` service.
+#
+# Base image and port are pinned per CONTRACTS.md - do not bump without
+# updating that file too. AGENT_PORT is read at runtime so it stays
+# configurable, but it must match CONTRACTS.md (8090) unless that file is
+# updated too.
+
+FROM python:3.11-slim-bookworm
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+# curl: used only by the container HEALTHCHECK below to probe /health.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --create-home --uid 1000 --shell /usr/sbin/nologin agentuser
+
+WORKDIR /app
+
+COPY services/agent/requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
+
+COPY services/agent/ /app/
+# Shared argument models (`from common.tool_models import ...`), see
+# services/common/__init__.py.
+COPY services/common/ /app/common/
+
+RUN chown -R agentuser:agentuser /app
+
+# Default per CONTRACTS.md - overridable at runtime via compose `environment:`.
+ENV AGENT_PORT=8090
+
+USER agentuser
+
+EXPOSE 8090
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -fsS "http://localhost:${AGENT_PORT}/health" || exit 1
+
+# Port is hardcoded to match CONTRACTS.md's AGENT_PORT default (8090); shells
+# don't expand $AGENT_PORT in exec-form CMD, so if you need it fully
+# configurable at runtime, swap this for a small entrypoint.sh like the other
+# services use.
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8090"]

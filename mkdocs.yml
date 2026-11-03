@@ -1,0 +1,70 @@
+site_name: Local LLM + C++/CMake Coding Assistant
+site_description: A RAG-based coding assistant, fully containerized and offline, built around a C++/CMake project.
+docs_dir: docs
+
+theme:
+  name: material
+  custom_dir: docs/overrides
+  palette:
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.top
+    - content.code.copy
+    - toc.integrate
+  font: false   # do not fetch Google Fonts - fully offline
+
+markdown_extensions:
+  - admonition
+  - pymdownx.highlight
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.details
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting started:
+      - Prerequisites: getting-started/prerequisites.md
+      - Installation: getting-started/installation.md
+      - First run: getting-started/first-run.md
+  - Architecture:
+      - Overview: architecture/overview.md
+      - Stack presentation (FR): architecture/stack-presentation.md
+      - Roadmap (FR): roadmap.md
+      - Networking: architecture/networking.md
+      - Security: architecture/security.md
+  - Concepts:
+      - Without the jargon (FR): concepts/en-clair.md
+      - RAG explained: concepts/rag-explained.md
+      - Indexing pipeline: concepts/indexing-pipeline.md
+      - Tool calling: concepts/tool-calling.md
+  - Guides:
+      - Using the assistant: guides/using-the-assistant.md
+      - Using VS Code: guides/vscode.md
+      - External MCP migration (FR): guides/migration-mcp-externe.md
+      - External libraries roadmap (FR): guides/roadmap-libs-externes.md
+      - Functional checks (FR): guides/prompt-tests-fonctionnels.md
+      - RTX 6000 scenarios (FR): guides/rtx6000-scenarios.md
+      - EVO-X5 agent comparison (FR): guides/evo-x5-agent-compare.md
+      - Adding a new tool: guides/adding-a-new-tool.md
+      - Reindexing the codebase: guides/reindexing-the-codebase.md
+      - Fine-tuning the codebase: guides/fine-tuning-the-codebase.md
+      - Swapping the model: guides/swapping-the-model.md
+      - Troubleshooting GPU: guides/troubleshooting-gpu.md
+      - Testing: guides/testing.md
+      - Retrieval baseline: guides/eval-checkout.md
+      - Review fixture: guides/review-fixture.md
+  - Reference:
+      - Agent API: reference/agent-api.md
+      - Tools API: reference/tools-api.md
+      - MCP: reference/mcp.md
+      - Compose services: reference/compose-services.md

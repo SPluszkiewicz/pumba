@@ -1,0 +1,192 @@
+diff --git a/src/calculator.cpp b/src/calculator.cpp
+--- a/src/calculator.cpp
++++ b/src/calculator.cpp
+@@ -20,6 +20,7 @@
+ class Parser {
+   public:
+     explicit Parser(std::string_view input) : input_(input) {}
++
+     int ParseExpression() {
+         int left = ParseSigned();
+         while (true) {
+@@ -111,6 +112,7 @@
+             return left;
+         }
+     }
++
+     void ExpectEnd() {
+         Skip();
+         if (pos_ != input_.size()) {
+@@ -156,6 +158,7 @@
+     return value;
+ }
+ 
++int Parser::ParsePrimary() {
+     if (Consume('(')) {
+         const int value = ParseExpression();
+         if (!Consume(')')) {
+@@ -173,6 +176,7 @@
+         return value;
+     }
+ }
++
+ int Parser::ParseSigned() {
+     const int sign = Consume('-') ? -1 : 1;
+     return sign * ParsePower();
+@@ -200,6 +204,7 @@
+     return value;
+ }
+
++int Parser::ParsePower() {
+     int value = ParsePrimary();
+     while (Consume('^')) {
+         value = Ipow(value, ParsePrimary());
+@@ -223,6 +228,7 @@
+     return value;
+ }
+ 
++int Parser::ParsePrimary() {
+     if (Consume('-')) {
+         return -ParsePrimary();
+     }
+@@ -231,6 +237,7 @@
+         return value;
+     }
+     Skip();
++    if (pos_ >= input_.size() || !std::isdigit(static_cast<unsigned char>(input_[pos_]))) {
++        throw CalcError("expected number");
++    }
+     int value = 0;
+     while (pos_ < input_.size() && std::isdigit(static_cast<unsigned char>(input_[pos_]))) {
+         value = value * 10 + (input_[pos_] - '0');
+@@ -241,6 +248,7 @@
+     return value;
+ }
+ 
++int Parser::ParseSigned() {
+     const int sign = Consume('-') ? -1 : 1;
+     return sign * ParsePrimary();
+@@ -260,6 +268,7 @@
+     return value;
+ }
+ 
++int Parser::ParseExpression() {
+     int left = ParseSigned();
+     while (true) {
+         const char op = Peek();
+@@ -278,6 +287,7 @@
+             return left - ParseExpression();
+         }
+         const int right = ParsePower();
++        if (right == 0 && op == '/') {
++            throw CalcError("division by zero");
++        }
+         if (op == '+') {
+             left += right;
+         } else if (op == '*') {
+@@ -291,6 +301,7 @@
+             left /= right;
+         }
+     }
++    if (pos_ < input_.size()) {
++        throw CalcError("expected end of input");
++    }
+     return left;
+ }
+
+diff --git a/tests/calculator_test.cpp b/tests/calculator_test.cpp
+--- a/tests/calculator_test.cpp
++++ b/tests/calculator_test.cpp
+@@ -1,64 +1,64 @@
+ #include <catch2/catch_test_macros.hpp>
+ 
+ #include "calculator.hpp"
+ 
+ TEST_CASE("single number") {
+     REQUIRE(calc::Evaluate("42") == 42);
+ }
+
+ TEST_CASE("addition and whitespace") {
+     REQUIRE(calc::Evaluate("1 + 2") == 3);
+ }
+ 
+ TEST_CASE("multiplication alone") {
+     REQUIRE(calc::Evaluate("3*4") == 12);
+ }
+ 
+ TEST_CASE("integer division") {
+     REQUIRE(calc::Evaluate("8/2") == 4);
+ }
+ 
+ TEST_CASE("power") {
+     REQUIRE(calc::Evaluate("2^3") == 8);
+ }
+ 
+ TEST_CASE("parentheses") {
+     REQUIRE(calc::Evaluate("(2+3)*4") == 20);
+ }
+ 
+ TEST_CASE("leading unary minus") {
+     REQUIRE(calc::Evaluate("-5+2") == -3);
+ }
+ 
+ TEST_CASE("empty input is an error") {
+     REQUIRE_THROWS_AS(calc::Evaluate("   "), calc::CalcError);
+ }
+ 
+-TEST_CASE("known_bug: multiplication binds tighter than addition") {
+-    REQUIRE(calc::Evaluate("2+3*4") == 14);
+-}
+-
+-TEST_CASE("known_bug: subtraction is left associative") {
+-    REQUIRE(calc::Evaluate("8-3-2") == 3);
+-}
+-
+-TEST_CASE("known_bug: exponent is right associative") {
+-    REQUIRE(calc::Evaluate("2^3^2") == 512);
+-}
+-
+-TEST_CASE("known_bug: power of zero is one") {
+-    REQUIRE(calc::Evaluate("5^0") == 1);
+-}
+-
+-TEST_CASE("known_bug: unary minus after an operator") {
+-    REQUIRE(calc::Evaluate("1+-2") == -1);
+-    REQUIRE(calc::Evaluate("2*-3") == -6);
+-}
+-
+-TEST_CASE("known_bug: division by zero is an error") {
+-    REQUIRE_THROWS_AS(calc::Evaluate("1/0"), calc::CalcError);
+-}
+-
+-TEST_CASE("known_bug: negative exponent is an error") {
+-    REQUIRE_THROWS_AS(calc::Evaluate("2^(-1)"), calc::CalcError);
+-}
++TEST_CASE("multiplication binds tighter than addition") {
++    REQUIRE(calc::Evaluate("2+3*4") == 14);
++}
++
++TEST_CASE("subtraction is left associative") {
++    REQUIRE(calc::Evaluate("8-3-2") == 3);
++}
++
++TEST_CASE("exponent is right associative") {
++    REQUIRE(calc::Evaluate("2^3^2") == 512);
++}
++
++TEST_CASE("power of zero is one") {
++    REQUIRE(calc::Evaluate("5^0") == 1);
++}
++
++TEST_CASE("unary minus after an operator") {
++    REQUIRE(calc::Evaluate("1+-2") == -1);
++    REQUIRE(calc::Evaluate("2*-3") == -6);
++}
++
++TEST_CASE("division by zero is an error") {
++    REQUIRE_THROWS_AS(calc::Evaluate("1/0"), calc::CalcError);
++}
++
++TEST_CASE("negative exponent is an error") {
++    REQUIRE_THROWS_AS(calc::Evaluate("2^(-1)"), calc::CalcError);
++}

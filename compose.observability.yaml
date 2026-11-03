@@ -1,0 +1,55 @@
+# Optional overlay: Prometheus + Grafana on a dedicated network, scraping
+# /metrics that already live on the isolated core-net / tools-net.
+#
+# Use the same engine and compose files as the running agent. A second
+# engine cannot resolve agent/tools/llm.
+#
+#   docker compose -f compose.yaml -f compose.docker.yaml -f compose.workspaces.yaml -f compose.observability.yaml --profile obs up -d prometheus grafana
+#   podman compose -f compose.yaml -f compose.workspaces.yaml -f compose.observability.yaml --profile obs up -d prometheus grafana
+#
+# Do not publish agent or tools ports. Grafana is the only host-facing UI
+# (http://localhost:3000, admin/admin by default - change it).
+
+networks:
+  obs-net: {}
+
+volumes:
+  prometheus-data: {}
+  grafana-data: {}
+
+services:
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    profiles: ["obs"]
+    networks: [core-net, tools-net, obs-net]
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    profiles: ["obs"]
+    networks: [obs-net]
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/local-llm.json
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./observability/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./observability/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    restart: unless-stopped

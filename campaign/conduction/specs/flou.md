@@ -1,0 +1,1 @@
+« Améliore le journal » a plusieurs lectures. Pose la question. Sans réponse écrite dans la liste prévue, ne modifie rien : les tests déjà écrits restent le comportement, y compris l'arrondi d'un total impair et `version()`.

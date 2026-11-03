@@ -1,0 +1,461 @@
+# See CONTRACTS.md for the full rationale behind ports/networks/env vars.
+# Every service here has been reconciled against its real Containerfile
+# (healthcheck tool availability, env var names, mount paths) - see
+# CONTRACTS.md's revision history via the plan file for details.
+#
+# REMAINING OPEN ITEM: the `llm` service's `devices: [nvidia.com/gpu=all]`
+# entry (CDI device syntax) has not been exercised against real GPU
+# hardware/a real `podman --version` - this genuinely can't be verified
+# without both, unlike everything else in this file. See
+# docs/guides/troubleshooting-gpu.md for the CDI setup this depends on. If
+# it turns out the installed podman-compose provider wants different
+# syntax, this is the one line to fix.
+
+networks:
+  client-net:
+    internal: true
+  core-net:
+    internal: true
+  tools-net:
+    internal: true
+  # Not internal, so the engine will bind the host port. Outbound stays
+  # closed by the runtime overlay: compose.docker.yaml (masquerade off) or
+  # compose.podman.yaml (no default route). Podman rejects the Docker option.
+  publish-net: {}
+
+volumes:
+  qdrant-data: {}
+
+services:
+  # ---------------------------------------------------------------- qdrant
+  qdrant:
+    image: qdrant/qdrant:v1.19.0
+    networks: [core-net]
+    volumes:
+      - qdrant-data:/qdrant/storage
+    # The official qdrant image ships neither curl nor wget (minimal-attack-
+    # surface base) - only bash. A bash /dev/tcp connect check confirms the
+    # port is accepting connections, which is what we get without adding
+    # packages to a third-party image we don't control.
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    restart: unless-stopped
+
+  # ------------------------------------------------------------------- llm
+  llm:
+    build:
+      context: .
+      dockerfile: containers/llm/Containerfile
+      # Overridable so the `test` profile can build a CPU-only image with the
+      # tiny model (see .env.test / docs/guides/testing.md) without a second
+      # service definition. Defaults to GPU per CONTRACTS.md.
+      args:
+        GPU: "${LLM_GPU_ARG:-1}"
+    # publish-net is required: Docker Desktop drops host ports on internal-only networks.
+    # Loopback only, same rule as the agent and MCP doors.
+    networks: [core-net, publish-net]
+    ports:
+      - "127.0.0.1:${LLM_PORT:-8080}:8080"
+    volumes:
+      - ./models:/models:ro
+    environment:
+      - LLM_MODEL_PATH=${LLM_MODEL_PATH}
+      - LLM_ROUTER=${LLM_ROUTER:-1}
+      - LLM_MODELS_MAX=${LLM_MODELS_MAX:-1}
+      - LLM_LORA_PATH=${LLM_LORA_PATH:-}
+      - LLM_NGL=${LLM_NGL:-}
+      - LLM_CTX_SIZE=${LLM_CTX_SIZE:-32768}
+      - LLM_CACHE_TYPE_K=${LLM_CACHE_TYPE_K:-q8_0}
+      - LLM_CACHE_TYPE_V=${LLM_CACHE_TYPE_V:-q8_0}
+      - LLM_PARALLEL=${LLM_PARALLEL:-1}
+      - LLM_GPU_MARGIN_MIB=${LLM_GPU_MARGIN_MIB:-2048}
+      - LLM_CACHE_RAM_MIB=${LLM_CACHE_RAM_MIB:-4096}
+      - LLM_THREADS=${LLM_THREADS:-}
+      - LLM_THREADS_BATCH=${LLM_THREADS_BATCH:-}
+      - LLM_NUMA=${LLM_NUMA:-}
+    devices:
+      - nvidia.com/gpu=all
+    # containers/llm/Containerfile installs curl specifically for this (no
+    # wget in that image) - keep in sync with that Containerfile.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    restart: unless-stopped
+
+  # -------------------------------------------------------------- embedder
+  embedder:
+    build:
+      context: .
+      dockerfile: containers/embedder/Containerfile
+      args:
+        GPU: "${EMBEDDER_GPU_ARG:-1}"
+    networks: [core-net]
+    volumes:
+      - ./models:/models:ro
+    environment:
+      - EMBEDDER_MODEL_PATH=${EMBEDDER_MODEL_PATH}
+      - EMBEDDER_NGL=${EMBEDDER_NGL:-}
+      - EMBEDDER_THREADS=${EMBEDDER_THREADS:-}
+      - EMBEDDER_NUMA=${EMBEDDER_NUMA:-}
+    devices:
+      - nvidia.com/gpu=all
+    # containers/embedder/Containerfile installs curl specifically for this
+    # (no wget in that image) - keep in sync with that Containerfile.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8081/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    restart: unless-stopped
+
+  # ------------------------------------------------------------- reranker
+  # Same image as embedder (one llama-server process, one model). CPU by
+  # default so VRAM stays with llm. agent does not wait on this healthcheck:
+  # a missing GGUF leaves retrieval on the RRF order.
+  reranker:
+    build:
+      context: .
+      dockerfile: containers/embedder/Containerfile
+      args:
+        GPU: "${EMBEDDER_GPU_ARG:-1}"
+    networks: [core-net]
+    volumes:
+      - ./models:/models:ro
+    environment:
+      - EMBEDDER_MODEL_PATH=${RERANKER_MODEL_PATH:-/models/bge-reranker-v2-m3-Q8_0.gguf}
+      - EMBEDDER_PORT=${RERANKER_PORT:-8082}
+      - EMBEDDER_NGL=${RERANKER_NGL:-0}
+      - EMBEDDER_THREADS=${RERANKER_THREADS:-}
+      - EMBEDDER_NUMA=${RERANKER_NUMA:-}
+      - EMBEDDER_POOLING=rank
+      - EMBEDDER_RERANK=1
+      - EMBEDDER_CTX=2048
+    devices:
+      - nvidia.com/gpu=all
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8082/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    restart: unless-stopped
+
+  # --------------------------------------------------------------- indexer
+  indexer:
+    build:
+      context: .
+      dockerfile: containers/indexer/Containerfile
+    networks: [core-net]
+    volumes:
+      - ${CODEBASE_PATH:-./sample}:/workspace/app:ro
+    environment:
+      - EMBEDDER_BASE_URL=${EMBEDDER_BASE_URL}
+      - QDRANT_URL=${QDRANT_URL}
+      - QDRANT_COLLECTION=${QDRANT_COLLECTION}
+      - INDEXER_SOURCE_ROOT=${INDEXER_SOURCE_ROOT}
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    profiles: ["index"]
+    restart: "no"
+
+  # ----------------------------------------------------------------- agent
+  agent:
+    build:
+      context: .
+      dockerfile: containers/agent/Containerfile
+    networks: [client-net, core-net, tools-net]
+    volumes:
+      - ${CODEBASE_PATH:-./sample}:/workspace/app:ro
+      - ./state/workspaces.json:/workspace/workspaces.json:ro
+    environment:
+      - AGENT_BEARER_TOKEN=${AGENT_BEARER_TOKEN}
+      - AGENT_TOOL_LOOP_MAX_ITERATIONS=${AGENT_TOOL_LOOP_MAX_ITERATIONS}
+      - AGENT_REQUEST_TIMEOUT_SECONDS=${AGENT_REQUEST_TIMEOUT_SECONDS}
+      - AGENT_LLM_MAX_RETRIES=${AGENT_LLM_MAX_RETRIES:-2}
+      - AGENT_MAX_CONCURRENT=${AGENT_MAX_CONCURRENT:-2}
+      - AGENT_CONTEXT_BUDGET_TOKENS=${AGENT_CONTEXT_BUDGET_TOKENS:-28544}
+      - AGENT_REPO_MAP_CHARS=${AGENT_REPO_MAP_CHARS:-16000}
+      - LLM_CTX_SIZE=${LLM_CTX_SIZE:-32768}
+      - AGENT_REFLECT=${AGENT_REFLECT:-0}
+      - AGENT_GATE_CLASSIFY=${AGENT_GATE_CLASSIFY:-1}
+      - AGENT_CONVERSATION_TTL_SECONDS=${AGENT_CONVERSATION_TTL_SECONDS:-28800}
+      - AGENT_CONVERSATION_MAX_TURNS=${AGENT_CONVERSATION_MAX_TURNS:-24}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LLM_BASE_URL=${LLM_BASE_URL}
+      - LLM_MODEL_PATH=${LLM_MODEL_PATH}
+      - EMBEDDER_MODEL_PATH=${EMBEDDER_MODEL_PATH}
+      - RERANKER_MODEL_PATH=${RERANKER_MODEL_PATH:-/models/bge-reranker-v2-m3-Q8_0.gguf}
+      - EMBEDDER_BASE_URL=${EMBEDDER_BASE_URL}
+      - RERANKER_BASE_URL=${RERANKER_BASE_URL:-http://reranker:8082}
+      - QDRANT_URL=${QDRANT_URL}
+      - QDRANT_COLLECTION=${QDRANT_COLLECTION}
+      - TOOLS_BASE_URL=${TOOLS_BASE_URL}
+      - PATCH_BASE_URL=${PATCH_BASE_URL:-http://patch:8093}
+      - AGENT_PROJECT_ROOT=/workspace/app
+    depends_on:
+      llm:
+        condition: service_healthy
+      embedder:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      tools:
+        condition: service_healthy
+      patch:
+        condition: service_healthy
+    # containers/agent/Containerfile installs curl specifically for this (no
+    # wget in that image) - keep in sync with that Containerfile.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8090/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    read_only: true
+    tmpfs: ["/tmp"]
+    restart: unless-stopped
+
+  # Docker Desktop does not publish a port for a container that sits only
+  # on internal networks. ui-proxy is the host's loopback door to agent.
+  ui-proxy:
+    # Unprivileged build of the same nginx (uid 101, no root master process).
+    # Fully qualified: Podman refuses unaliased short names non-interactively.
+    image: docker.io/nginxinc/nginx-unprivileged:1.27-alpine
+    networks: [client-net, publish-net]
+    ports:
+      - "127.0.0.1:${AGENT_PORT:-8090}:8090"
+    volumes:
+      - ./containers/host-proxy/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      agent:
+        condition: service_healthy
+    read_only: true
+    tmpfs: ["/tmp"]
+    # Listens on 8090 (> 1024) as a non-root user: no capability is needed.
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+
+  # ------------------------------------------------------------------- mcp
+  mcp:
+    build:
+      context: .
+      dockerfile: containers/mcp/Containerfile
+    # publish-net is required: Docker Desktop drops host ports on internal-only networks.
+    networks: [client-net, publish-net]
+    ports:
+      # Loopback only. Host and container ports both follow MCP_PORT
+      # (the process listens on that env var; a fixed :8092 target would
+      # miss it if MCP_PORT is not 8092).
+      - "127.0.0.1:${MCP_PORT:-8092}:${MCP_PORT:-8092}"
+    environment:
+      - AGENT_BASE_URL=${AGENT_BASE_URL:-http://agent:8090}
+      - AGENT_BEARER_TOKEN=${AGENT_BEARER_TOKEN}
+      - MCP_PORT=${MCP_PORT:-8092}
+      - MCP_TRANSPORT=${MCP_TRANSPORT:-http}
+      - MCP_REQUEST_TIMEOUT_SECONDS=${MCP_REQUEST_TIMEOUT_SECONDS:-172800}
+    depends_on:
+      agent:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:${MCP_PORT:-8092}/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    read_only: true
+    tmpfs: ["/tmp"]
+    restart: unless-stopped
+
+  # ----------------------------------------------------------------- patch
+  # The only service whose checkout mount is read-write. agent and tools stay :ro.
+  # Not published: it is on tools-net, next to the agent. No commit, no push.
+  patch:
+    build:
+      context: .
+      dockerfile: containers/patch/Containerfile
+    networks: [tools-net]
+    volumes:
+      - ${CODEBASE_PATH:-./sample}:/workspace/app
+    environment:
+      - PATCH_PROJECT_ROOT=/workspace/app
+      - PATCH_PORT=8093
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8093/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    read_only: true
+    tmpfs: ["/tmp"]
+    restart: unless-stopped
+
+  # ----------------------------------------------------------------- tools
+  tools:
+    build:
+      context: .
+      dockerfile: containers/tools/Containerfile
+    networks: [tools-net]
+    volumes:
+      # Whole tree including .git (git_* tools are read-only). CODEBASE_PATH
+      # should be a git work tree; sample/ has no .git of its own.
+      - ${CODEBASE_PATH:-./sample}:/workspace/app:ro
+    environment:
+      - TOOLS_BUILD_TIMEOUT_SECONDS=${TOOLS_BUILD_TIMEOUT_SECONDS}
+      - TOOLS_CMAKE_PRESET=${TOOLS_CMAKE_PRESET}
+      - TOOLS_PROJECT_ROOT=${TOOLS_PROJECT_ROOT}
+      - TOOLS_HEALTH_STRICT=${TOOLS_HEALTH_STRICT:-1}
+    # containers/tools/Containerfile installs wget specifically for this (no
+    # curl in that image) - keep in sync with that Containerfile.
+    healthcheck:
+      # wget --spider sends HEAD; FastAPI's /health is GET-only (405).
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8091/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    read_only: true
+    # A bare tmpfs is root:root mode 755 and noexec, so mkdtemp() fails
+    # and CMake cannot run the Catch2 test binary it just linked.
+    # mode=1777 lets toolsuser (uid 1000) create files. uid= and gid= are
+    # valid on Docker but Podman 4.9 rejects them ("unknown mount option").
+    tmpfs:
+      - /tmp:mode=1777,exec
+      - /workspace/scratch:mode=1777,exec
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 4G
+          pids: 256
+    pids_limit: 256
+    restart: unless-stopped
+
+  # ------------------------------------------------------------------- app
+  app:
+    build:
+      context: .
+      dockerfile: containers/app/Containerfile
+    networks: [client-net]
+    environment:
+      - AGENT_BASE_URL=http://agent:${AGENT_PORT}
+      - AGENT_BEARER_TOKEN=${AGENT_BEARER_TOKEN}
+      - APP_REQUEST_TIMEOUT_SECONDS=${APP_REQUEST_TIMEOUT_SECONDS:-172800}
+    depends_on:
+      agent:
+        condition: service_healthy
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    read_only: true
+    tmpfs: ["/tmp"]
+    stdin_open: true
+    tty: true
+
+  # ------------------------------------------------------------------ docs
+  docs:
+    build:
+      context: .
+      dockerfile: containers/docs/Containerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./docs:/docs/docs:ro
+      - ./mkdocs.yml:/docs/mkdocs.yml:ro
+    profiles: ["docs"]
+
+  # --------------------------------------------------------------devtools
+  devtools:
+    build:
+      context: .
+      dockerfile: containers/devtools/Containerfile
+    volumes:
+      - ./:/workspace:rw
+    working_dir: /workspace
+    profiles: ["dev"]
+    stdin_open: true
+    tty: true
+
+  # ---------------------------------------------------------- test (CI only)
+  smoke-test:
+    build:
+      context: .
+      dockerfile: containers/devtools/Containerfile
+    # Attached to all three internal networks (unlike any production
+    # service) so tests/integration/test_smoke.py can probe llm/embedder/
+    # qdrant/tools health directly, not just end-to-end through `agent`.
+    # This container only exists under the `test` profile for CI - it is
+    # never part of the security boundary the real services observe.
+    networks: [client-net, core-net, tools-net]
+    volumes:
+      - ./:/workspace:rw
+    working_dir: /workspace
+    environment:
+      - AGENT_BASE_URL=http://agent:${AGENT_PORT}
+      - AGENT_BEARER_TOKEN=${AGENT_BEARER_TOKEN}
+      - LLM_BASE_URL=${LLM_BASE_URL}
+      - EMBEDDER_BASE_URL=${EMBEDDER_BASE_URL}
+      - QDRANT_URL=${QDRANT_URL}
+      - TOOLS_BASE_URL=${TOOLS_BASE_URL}
+    command: ["python", "-m", "pytest", "-v", "tests/integration/test_smoke.py"]
+    profiles: ["test"]
+
+  # ------------------------------------------------------ setup (network-enabled, non-internal)
+  fetch-models:
+    build:
+      context: .
+      dockerfile: containers/devtools/Containerfile
+    volumes:
+      - ./models:/workspace/models
+      - ./scripts:/workspace/scripts:ro
+    working_dir: /workspace
+    command: ["python", "scripts/container/fetch_models.py"]
+    profiles: ["setup"]
+
+  # --------------------------------------------------------------- trainer
+  trainer:
+    build:
+      context: .
+      dockerfile: containers/trainer/Containerfile
+    profiles: ["train"]
+    devices:
+      - nvidia.com/gpu=all
+    volumes:
+      - ${CODEBASE_PATH:-./sample}:/workspace/app:ro
+      - ./models:/models:rw
+    environment:
+      - TRAIN_BASE_MODEL=${TRAIN_BASE_MODEL:-/models/hf/Qwen2.5-7B-Instruct}
+      - TRAIN_ADAPTER_OUT=${TRAIN_ADAPTER_OUT:-/models/adapters}
+      - TRAIN_DATASET_DIR=${TRAIN_DATASET_DIR:-/models/training}
+      - TRAIN_SOURCE_ROOT=/workspace/app
+      - TRAIN_MAX_STEPS=${TRAIN_MAX_STEPS:-200}
+      - TRAIN_LORA_RANK=${TRAIN_LORA_RANK:-16}
+      - TRAIN_LORA_ALPHA=${TRAIN_LORA_ALPHA:-32}
+      - TRAIN_MAX_SEQ_LENGTH=${TRAIN_MAX_SEQ_LENGTH:-2048}
+      - LLAMA_CPP_DIR=/opt/llama.cpp
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    restart: "no"

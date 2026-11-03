@@ -1,0 +1,13 @@
+# Keep image builds off the host temp disk. The compose context is the repo
+# root; these trees are bind-mounted or irrelevant and must not be packed
+# into the build archive.
+.git
+.mypy_cache
+.pytest_cache
+.ruff_cache
+.wsl-setup
+wsl-distro
+models
+app/build
+**/__pycache__
+**/*.pyc

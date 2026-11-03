@@ -1,0 +1,27 @@
+{
+  // This project only ever uses Podman - nothing is installed on the host
+  // except Podman itself. Point your editor's Dev Containers extension at
+  // the Podman binary before opening this folder, e.g. in Cursor/VS Code
+  // user or workspace settings.json:
+  //   "dev.containers.dockerPath": "podman"
+  // This is an editor-level setting; devcontainer.json cannot set it itself.
+  "name": "local_llm devtools",
+  // Reuses the `devtools` service defined in compose.yaml (which builds
+  // containers/devtools/Containerfile) instead of duplicating build config -
+  // that Containerfile + compose.yaml together are the single source of
+  // truth for this toolchain image.
+  "dockerComposeFile": ["../compose.yaml"],
+  "service": "devtools",
+  "workspaceFolder": "/workspace",
+  "shutdownAction": "stopCompose",
+  // Matches the non-root user created in containers/devtools/Containerfile.
+  "remoteUser": "dev",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-vscode.cpptools",
+        "ms-python.python"
+      ]
+    }
+  }
+}

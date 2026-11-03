@@ -1,0 +1,20 @@
+[
+  {
+    "id": "does_it_build",
+    "question": "Does this project compile with the release preset? Use tools, do not guess.",
+    "expected_tool": "build",
+    "expected_args_subset": {"preset": "release"}
+  },
+  {
+    "id": "compile_one_file",
+    "question": "Compile only src/AgentClient.cpp and tell me if that translation unit builds.",
+    "expected_tool": "compile_file",
+    "expected_args_subset": {"path": "src/AgentClient.cpp"}
+  },
+  {
+    "id": "run_one_test",
+    "question": "Run only the json_round_trip ctest case.",
+    "expected_tool": "test",
+    "expected_args_subset": {"filter": "json_round_trip"}
+  }
+]

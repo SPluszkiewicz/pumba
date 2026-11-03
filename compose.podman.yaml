@@ -1,0 +1,9 @@
+# Podman overlay. `com.docker.network.bridge.enable_ip_masquerade` is a
+# Docker network option; Podman rejects it. `no_default_route` keeps
+# publish-net from opening outbound connections, and the network stays
+# non-internal so loopback ports still bind.
+
+networks:
+  publish-net:
+    driver_opts:
+      no_default_route: "true"

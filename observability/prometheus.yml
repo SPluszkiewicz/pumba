@@ -1,0 +1,19 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: agent
+    static_configs:
+      - targets: ["agent:8090"]
+  - job_name: tools
+    static_configs:
+      - targets: ["tools:8091"]
+  # LLM_ROUTER=1 answers /metrics only when ?model= is the GGUF stem
+  # (basename of LLM_MODEL_PATH, without .gguf).
+  - job_name: llm
+    metrics_path: /metrics
+    params:
+      model:
+        - Qwen2.5-Coder-14B-Instruct-Q5_K_M
+    static_configs:
+      - targets: ["llm:8080"]

@@ -1,0 +1,26 @@
+---
+# Modern C++ style for this repo, based on Google style with 4-space indent.
+# clang-format 18 (Ubuntu 24.04 clang-tools-18), see CONTRACTS.md.
+BasedOnStyle: Google
+Language: Cpp
+Standard: c++20
+
+IndentWidth: 4
+AccessModifierOffset: -3
+ColumnLimit: 100
+UseTab: Never
+
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+BinPackArguments: false
+BinPackParameters: false
+DerivePointerAlignment: false
+PointerAlignment: Left
+ReferenceAlignment: Left
+SortIncludes: true
+IncludeBlocks: Regroup
+NamespaceIndentation: None
+SpaceAfterTemplateKeyword: false
+Cpp11BracedListStyle: true
+FixNamespaceComments: true

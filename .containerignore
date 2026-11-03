@@ -1,0 +1,16 @@
+.git
+.gitignore
+.devcontainer
+docs/
+site/
+models/*.gguf
+build/
+app/build
+out/
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+tests/
+CONTRACTS.md
+*.plan.md

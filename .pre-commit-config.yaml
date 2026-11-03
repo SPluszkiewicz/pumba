@@ -1,0 +1,45 @@
+# Optional local hooks: `pip install pre-commit && pre-commit install`.
+# Everything here also runs in CI (.github/workflows/ci.yml), so skipping the
+# local install only costs you a slower feedback loop, never correctness.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.10
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+        # Formatting is not enforced repo-wide yet (the codebase predates
+        # ruff-format); check only, never rewrite, until a dedicated pass.
+        args: [--check]
+        stages: [manual]
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.19.1
+    hooks:
+      - id: mypy
+        files: ^services/(tools|common)/
+        additional_dependencies: [fastapi, pydantic]
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-yaml
+        exclude: ^mkdocs\.yml$   # uses the !!python/name tag for mermaid fences
+      - id: check-json
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      # The CRLF guard: fails if any tracked shell/entrypoint file has CRLF.
+      - id: mixed-line-ending
+        args: [--fix=lf]
+        files: \.(sh|sample|yaml|yml)$|Containerfile$
+
+  - repo: local
+    hooks:
+      - id: clang-format-check
+        name: clang-format --dry-run (app/)
+        entry: clang-format --dry-run --Werror --style=file
+        language: system
+        files: ^app/.*\.(cpp|hpp|h|cc)$
+        # Only runs if clang-format is on PATH; inside the devtools container it is.
+        require_serial: false

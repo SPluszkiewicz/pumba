@@ -1,0 +1,51 @@
+# Secrets / local config
+.env
+atlassian.env
+
+# Model weights
+models/*.gguf
+models/hf/
+models/adapters/
+models/training/
+
+# Build outputs
+build/
+out/
+*.o
+*.obj
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+.venv-wsl/
+.venv-win/
+*.egg-info/
+
+# Docs build output
+site/
+
+# Editor / OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
+
+# Qdrant local data (if ever run outside a named volume)
+qdrant_storage/
+
+# Transient stdin prompt for `deploy.py ask -`
+.prompt.tmp
+
+# Generated checkout mounts and the indexer queue lock
+compose.workspaces.yaml
+state/index.lock
+state/profile-campaign.json
+state/profile-campaign.env.bak
+state/compare/
+
+# Local ticket for the agent comparison. Not in the commit: a worktree must
+# not be able to `git show` it. The scorer reads the last non-empty line.
+campaign/external/*
+!campaign/external/.gitkeep

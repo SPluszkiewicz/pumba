@@ -1,0 +1,13 @@
+#!/bin/sh
+# Sample post-commit hook for CODEBASE_PATH (install with scripts/install_train_hook.py).
+# Runs incremental QLoRA training after each commit when WSL local-llm is available.
+set -eu
+
+LOCK="/mnt/d/rest/local_llm/models/training/.train.lock"
+if [ -f "$LOCK" ]; then
+  echo "[post-commit] training lock present, skipping"
+  exit 0
+fi
+
+wsl -d local-llm -- bash -lc "cd /mnt/d/rest/local_llm && python3 scripts/deploy.py train --incremental --skip-index" \
+  || echo "[post-commit] train failed (see deploy output)"

@@ -1,0 +1,21 @@
+# Shell scripts and container entrypoints are executed inside Linux
+# containers / WSL. CRLF line endings make `#!/bin/sh` fail with
+# "No such file or directory" (the kernel looks for `sh\r`) - this bit us
+# once on a Windows checkout. Force LF regardless of core.autocrlf.
+*.sh            text eol=lf
+docs/javascripts/mermaid.min.js text eol=lf
+*.sample        text eol=lf
+Containerfile   text eol=lf
+Dockerfile      text eol=lf
+*.yaml          text eol=lf
+*.yml           text eol=lf
+.env.example    text eol=lf
+.env.test       text eol=lf
+
+# Everything else: normalise to LF in the repo, checkout per platform.
+* text=auto
+
+# Binary model/data files (never in git, but be explicit).
+*.gguf          binary
+*.vhdx          binary
+*.safetensors   binary

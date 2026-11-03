@@ -1,0 +1,8 @@
+{#-
+  Theme partial, plus the vendored Mermaid build.
+  Material 9.5 downloads mermaid from unpkg.com when a page contains a
+  diagram. This script is in the head, so the global exists before the
+  theme bundle and that download never happens.
+-#}
+<script>__md_scope=new URL("{{ config.extra.scope | d(base_url) }}",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+<script src="{{ 'javascripts/mermaid.min.js' | url }}"></script>

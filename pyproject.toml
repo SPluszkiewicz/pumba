@@ -1,0 +1,44 @@
+# Tooling configuration only - this repository is not a single installable
+# Python package (each service under services/ ships its own requirements.txt
+# and is built into its own container). ruff/mypy read this file; pytest reads
+# pytest.ini.
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = ["wsl-distro", ".wsl-setup", "models", "site", "build"]
+
+[tool.ruff.lint]
+# E/W: pycodestyle, F: pyflakes, B: bugbear (likely bugs), I: import order.
+# UP (pyupgrade) is deliberately NOT enabled: the services target Python 3.11
+# but `services/tools` runs on Ubuntu 24.04's apt Python (3.12) and keeps
+# `Optional[...]`-style annotations on purpose for readability parity.
+select = ["E", "F", "W", "B", "I"]
+ignore = [
+    # `zip(strict=...)` is enforced only where lengths must match (indexer);
+    # elsewhere the flag is noise.
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests sys.path-hack before importing the module under test.
+"tests/**" = ["E402"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["services", "deploy", "eval_rag", "eval_tools", "fetch_models", "install_deps", "fix_permissions"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+check_untyped_defs = true
+# The Python services are flat module trees (agent/, indexer/) imported by
+# bare name inside their containers, plus one real package (services.tools).
+# Run mypy per directory (see .github/workflows/ci.yml) rather than on the
+# whole repo so `main.py` in two services doesn't collide.
+explicit_package_bases = true
+# The flat-layout agent imports the shared models as `common.tool_models`
+# (copied to /app/common/ in its container). Check it with
+# `MYPYPATH=services mypy services/agent` (see ci.yml / .pre-commit-config.yaml);
+# a global `mypy_path` here would make `services.tools.*` visible twice.

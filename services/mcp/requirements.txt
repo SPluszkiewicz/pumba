@@ -1,0 +1,6 @@
+# Thin MCP front for agent (CONTRACTS.md). Pins stay compatible with the
+# shared CI/devtools venv (agent's fastapi 0.115 → starlette 0.41,
+# pydantic 2.10.4). mcp 1.21+ requires pydantic>=2.11 — do not bump here
+# without also moving agent.
+httpx==0.28.1
+mcp==1.12.4

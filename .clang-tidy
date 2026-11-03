@@ -1,0 +1,42 @@
+---
+# clang-tidy 18 (Ubuntu 24.04 clang-tools-18), see CONTRACTS.md. Moving from
+# clang-tools-14 to -18 (Ubuntu 22.04 -> 24.04) pulls in whatever new checks
+# later clang-tidy versions added under the bugprone-*/performance-*/
+# modernize-*/readability-* wildcards below - if `/lint` starts flagging
+# things it didn't before, that's an expected side effect of the newer
+# checker set, not necessarily a code regression; tune the exclusion list
+# below rather than assuming the worst. WarningsAsErrors is empty, so this
+# never fails a build on its own either way.
+Checks: >
+  bugprone-*,
+  performance-*,
+  modernize-*,
+  readability-*,
+  -modernize-use-trailing-return-type,
+  -readability-identifier-length,
+  -readability-magic-numbers,
+  -bugprone-easily-swappable-parameters
+
+WarningsAsErrors: ''
+HeaderFilterRegex: '.*'
+FormatStyle: file
+
+CheckOptions:
+  - key: readability-identifier-naming.NamespaceCase
+    value: lower_case
+  - key: readability-identifier-naming.ClassCase
+    value: CamelCase
+  - key: readability-identifier-naming.StructCase
+    value: CamelCase
+  - key: readability-identifier-naming.FunctionCase
+    value: CamelCase
+  - key: readability-identifier-naming.VariableCase
+    value: lower_case
+  - key: readability-identifier-naming.PrivateMemberSuffix
+    value: _
+  - key: readability-identifier-naming.ConstantCase
+    value: lower_case
+  - key: readability-identifier-naming.EnumCase
+    value: CamelCase
+  - key: readability-identifier-naming.EnumConstantCase
+    value: CamelCase

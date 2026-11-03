@@ -1,0 +1,40 @@
+# Writer for working-copy edits. Checkout mounts are read-write here only.
+# The root filesystem stays read-only. There is no git commit or push.
+
+FROM python:3.11-slim-bookworm
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl \
+        git \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --create-home --uid 1000 --shell /usr/sbin/nologin patchuser
+
+WORKDIR /app
+
+COPY services/patch/requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.txt
+
+COPY services/patch/ /app/services/patch/
+COPY services/common/tool_models.py /tmp/tool_models.py
+COPY services/tools/handlers/path_safety.py /tmp/path_safety.py
+RUN mkdir -p /app/services/common /app/services/tools/handlers \
+    && touch /app/services/__init__.py /app/services/common/__init__.py \
+        /app/services/tools/__init__.py /app/services/tools/handlers/__init__.py \
+    && mv /tmp/tool_models.py /app/services/common/tool_models.py \
+    && mv /tmp/path_safety.py /app/services/tools/handlers/path_safety.py \
+    && chown -R patchuser:patchuser /app
+
+ENV PATCH_PORT=8093 \
+    PATCH_PROJECT_ROOT=/workspace/app
+
+USER patchuser
+
+EXPOSE 8093
+
+CMD ["sh", "-c", "uvicorn services.patch.main:app --host 0.0.0.0 --port ${PATCH_PORT}"]

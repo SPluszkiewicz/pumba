@@ -1,0 +1,15 @@
+# services/tools - pinned exact versions for reproducible builds.
+# C++ toolchain versions (cmake/gcc/clang-tidy/clang-format/cppcheck/ripgrep)
+# are pinned in containers/tools/Containerfile per CONTRACTS.md; these are
+# just this service's own Python dependencies.
+
+fastapi==0.115.6
+pydantic==2.10.4
+uvicorn[standard]==0.34.0
+prometheus-client==0.21.1
+prometheus-fastapi-instrumentator==7.1.0
+
+# Test dependencies (this service has no separate dev-requirements file;
+# tests are run inside the `devtools` container, see docs/guides/testing.md).
+pytest==8.3.4
+httpx==0.28.1

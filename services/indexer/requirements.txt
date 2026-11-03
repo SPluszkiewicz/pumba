@@ -1,0 +1,28 @@
+# Pinned per CONTRACTS.md (python:3.11-slim-bookworm) plus indexer-specific deps.
+#
+# tree-sitter grammars (see docs/concepts/indexing-pipeline.md):
+#   - `tree-sitter-cpp` (official tree-sitter-org package) for C++: prebuilt
+#     ABI3 wheels, so `pip install` needs no C compiler on
+#     python:3.11-slim-bookworm (the Containerfile has no build-essential).
+#   - `tree-sitter-language-pack` (maintained; prebuilt wheels, ~6 MB) for the
+#     non-C++ files chunked by text_chunker.py: markdown, cmake, yaml, json,
+#     toml. Reusing community grammars instead of hand-rolled regex parsing.
+#   - NOT `tree_sitter_languages` (grantjenks): unmaintained since 2023 and
+#     broken against `tree-sitter` >= 0.22 (ABI drift).
+tree-sitter==0.23.2
+tree-sitter-cpp==0.23.4
+tree-sitter-language-pack==1.20.0
+
+# Official OpenAI SDK for the embedder's OpenAI-compatible /v1/embeddings
+# endpoint (retries, typed responses). Pinned to the 2.x line: 3.x depends on
+# `httpx2`, while the rest of the repo (agent, tests) is on `httpx` 0.x.
+openai==2.54.0
+httpx==0.28.1
+# Structured JSON logging (services/common/logging.py).
+structlog==26.1.0
+
+# Qdrant server is pinned to v1.19.0 in CONTRACTS.md; match the client version.
+qdrant-client==1.19.0
+
+# Best-effort --watch mode (see main.py docstring for the Linux-preferred caveat).
+watchdog==5.0.3

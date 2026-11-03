@@ -1,0 +1,670 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Assistant local</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: system-ui, sans-serif;
+      background: #12141a;
+      color: #e7e5e4;
+    }
+    header, main { max-width: 48rem; margin: 0 auto; padding: 1rem 1.25rem; }
+    header { border-bottom: 1px solid #2a2e38; }
+    h1 { font-size: 1.15rem; font-weight: 600; margin: 0 0 0.25rem; }
+    p.hint { margin: 0; color: #a8a29e; font-size: 0.9rem; }
+    label { display: block; font-size: 0.85rem; margin: 0.85rem 0 0.3rem; }
+    input, textarea, button {
+      font: inherit;
+      color: inherit;
+      background: #1c1f27;
+      border: 1px solid #3f4553;
+      border-radius: 6px;
+    }
+    input, textarea { width: 100%; padding: 0.55rem 0.7rem; }
+    textarea { min-height: 6rem; resize: vertical; }
+    textarea.short { min-height: 2.6rem; }
+    .row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+    button { padding: 0.5rem 0.85rem; cursor: pointer; }
+    button.primary { background: #3b4cca; border-color: #3b4cca; }
+    button:disabled { opacity: 0.5; cursor: default; }
+    #status { min-height: 1.2rem; color: #a8a29e; font-size: 0.85rem; }
+    .meter { height: 0.4rem; background: #2a2e38; border-radius: 99px; overflow: hidden; margin-top: 0.35rem; }
+    .meter span { display: block; height: 100%; width: 0; background: #3b4cca; }
+    #status.error { color: #f0a8a0; }
+    article {
+      margin: 0.75rem 0;
+      padding: 0.75rem 0.9rem;
+      background: #1c1f27;
+      border-radius: 8px;
+    }
+    article .who { font-size: 0.75rem; letter-spacing: 0.04em; text-transform: uppercase; color: #a8a29e; }
+    article pre {
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: ui-monospace, monospace;
+      margin: 0.4rem 0 0;
+    }
+    .md { margin: 0.4rem 0 0; line-height: 1.45; }
+    .md p { margin: 0.45rem 0; }
+    .md h1, .md h2, .md h3, .md h4, .md h5, .md h6 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin: 0.85rem 0 0.3rem;
+    }
+    .md ul, .md ol { margin: 0.35rem 0; padding-left: 1.2rem; }
+    .md li { margin: 0.15rem 0; }
+    .md p code, .md li code {
+      font-family: ui-monospace, monospace;
+      background: #12141a;
+      padding: 0.05rem 0.3rem;
+      border-radius: 4px;
+    }
+    .codeblock {
+      margin: 0.55rem 0;
+      border: 1px solid #3f4553;
+      border-radius: 6px;
+      overflow: hidden;
+      background: #12141a;
+    }
+    .codebar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.25rem 0.5rem;
+      color: #a8a29e;
+      font-size: 0.75rem;
+    }
+    .codebar button.copy { padding: 0.15rem 0.55rem; font-size: 0.75rem; }
+    .codeblock pre {
+      margin: 0;
+      padding: 0.55rem 0.7rem 0.7rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: ui-monospace, monospace;
+    }
+    .md blockquote {
+      margin: 0.4rem 0;
+      padding-left: 0.7rem;
+      border-left: 3px solid #3f4553;
+      color: #d6d3d1;
+    }
+    .md a { color: #9db4ff; }
+    ul.sources, ol.trace { margin: 0.4rem 0 0; padding-left: 1.1rem; color: #d6d3d1; font-size: 0.9rem; }
+    ol.trace { list-style: decimal; }
+    ol.trace li { margin: 0.35rem 0; }
+    ol.trace pre.tool-args, ol.trace li > pre {
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: ui-monospace, monospace;
+      font-size: 0.8rem;
+      margin: 0.3rem 0 0;
+      color: #d6d3d1;
+    }
+    details { margin-top: 0.25rem; }
+    details pre { margin: 0.35rem 0 0; color: #a8a29e; font-size: 0.8rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Assistant local</h1>
+    <p class="hint">Le jeton reste dans cet onglet. Le déroulement indique d'abord si la question part en réponse directe ou passe par l'index et les outils. Les réponses sont en Markdown ; chaque bloc de code a un bouton Copier. Un correctif proposé est un bloc diff à copier : il n'est pas appliqué.</p>
+  </header>
+  <main>
+    <form id="token-form">
+      <label for="token">Jeton <code>AGENT_BEARER_TOKEN</code></label>
+      <div class="row">
+        <input id="token" type="password" autocomplete="off" required>
+        <button type="submit">Mémoriser</button>
+        <button type="button" id="forget">Oublier</button>
+      </div>
+    </form>
+    <p id="conv" class="hint"></p>
+    <label for="model">Modèle de chat</label>
+    <div class="row">
+      <select id="model" disabled></select>
+      <button type="button" id="apply-model" disabled>Charger</button>
+    </div>
+    <p id="model-status" class="hint"></p>
+    <p id="context" class="hint">Contexte —</p>
+    <div class="meter" aria-hidden="true"><span id="context-bar"></span></div>
+    <div id="log"></div>
+    <form id="ask-form">
+      <label for="query">Question</label>
+      <textarea id="query" required></textarea>
+      <label for="instructions">Consignes pour cette question (optionnel)</label>
+      <textarea id="instructions" class="short"></textarea>
+      <div class="row">
+        <button class="primary" id="send" type="submit">Envoyer</button>
+        <button type="button" id="stop" disabled>Arrêter l'affichage</button>
+        <button type="button" id="fresh">Nouvelle conversation</button>
+      </div>
+    </form>
+    <p id="status"></p>
+  </main>
+  <script>
+    const TOKEN_KEY = "local_llm_token";
+    const tokenInput = document.getElementById("token");
+    const logEl = document.getElementById("log");
+    const statusEl = document.getElementById("status");
+    const convEl = document.getElementById("conv");
+    const contextEl = document.getElementById("context");
+    const contextBar = document.getElementById("context-bar");
+    const sendBtn = document.getElementById("send");
+    const stopBtn = document.getElementById("stop");
+    let conversationId = "";
+    let abortController = null;
+
+    tokenInput.value = sessionStorage.getItem(TOKEN_KEY) || "";
+    renderConv();
+
+    const modelSelect = document.getElementById("model");
+    const applyModel = document.getElementById("apply-model");
+    const modelStatus = document.getElementById("model-status");
+
+    async function refreshModels() {
+      const token = tokenInput.value;
+      if (!token) return;
+      const resp = await fetch("/models", { headers: { "Authorization": "Bearer " + token } });
+      if (!resp.ok) {
+        modelStatus.textContent = "Liste des modèles indisponible.";
+        return;
+      }
+      const body = await resp.json();
+      modelSelect.replaceChildren();
+      (body.models || []).forEach(function (item) {
+        const option = document.createElement("option");
+        option.value = item.id;
+        option.textContent = item.id + (item.status === "loaded" ? " (chargé)" : "");
+        if (item.id === body.active) option.selected = true;
+        modelSelect.appendChild(option);
+      });
+      const ready = modelSelect.options.length > 0;
+      modelSelect.disabled = !ready;
+      applyModel.disabled = !ready;
+    }
+
+    applyModel.addEventListener("click", async function () {
+      const token = tokenInput.value;
+      if (!token || !modelSelect.value) return;
+      applyModel.disabled = true;
+      modelSelect.disabled = true;
+      modelStatus.textContent = "Chargement de " + modelSelect.value + "…";
+      try {
+        const resp = await fetch("/models/select", {
+          method: "POST",
+          headers: {
+            "Authorization": "Bearer " + token,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ model: modelSelect.value })
+        });
+        const detail = await resp.text();
+        modelStatus.textContent = resp.ok ? "Modèle chargé." : detail;
+      } catch (err) {
+        modelStatus.textContent = String(err);
+      }
+      await refreshModels();
+    });
+
+    document.getElementById("token-form").addEventListener("submit", function (event) {
+      event.preventDefault();
+      sessionStorage.setItem(TOKEN_KEY, tokenInput.value);
+      setStatus("Jeton mémorisé pour cet onglet.");
+      refreshModels();
+    });
+    if (tokenInput.value) refreshModels();
+    document.getElementById("forget").addEventListener("click", function () {
+      sessionStorage.removeItem(TOKEN_KEY);
+      tokenInput.value = "";
+      setStatus("Jeton oublié.");
+    });
+    document.getElementById("fresh").addEventListener("click", function () {
+      conversationId = "";
+      logEl.replaceChildren();
+      renderConv();
+      setStatus("");
+    });
+    stopBtn.addEventListener("click", function () {
+      const token = tokenInput.value;
+      if (token && conversationId) {
+        fetch("/chat/cancel", {
+          method: "POST",
+          headers: {
+            "Authorization": "Bearer " + token,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ conversation_id: conversationId })
+        });
+      }
+      if (abortController) abortController.abort();
+    });
+    document.getElementById("ask-form").addEventListener("submit", function (event) {
+      event.preventDefault();
+      ask(document.getElementById("query").value);
+    });
+
+    function renderConv() {
+      convEl.textContent = conversationId
+        ? "Conversation " + conversationId
+        : "Nouvelle conversation";
+    }
+
+    function setStatus(text, isError) {
+      statusEl.textContent = text;
+      statusEl.className = isError ? "error" : "";
+    }
+
+    function copyText(text) {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        return navigator.clipboard.writeText(text);
+      }
+      return new Promise(function (resolve, reject) {
+        const area = document.createElement("textarea");
+        area.value = text;
+        document.body.append(area);
+        area.select();
+        try {
+          if (document.execCommand("copy")) resolve();
+          else reject(new Error("copy"));
+        } catch (err) {
+          reject(err);
+        } finally {
+          area.remove();
+        }
+      });
+    }
+
+    function isBlockStart(line) {
+      return /^```/.test(line)
+        || /^#{1,6}\s+/.test(line)
+        || /^\s*([-*]|\d+\.)\s+/.test(line)
+        || /^>\s?/.test(line)
+        || /^(---|\*\*\*|___)\s*$/.test(line);
+    }
+
+    function appendInlines(parent, text) {
+      const pattern = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*]+\*)|(\[[^\]]+\]\([^)\s]+\))/g;
+      let last = 0;
+      let match;
+      while ((match = pattern.exec(text))) {
+        if (match.index > last) parent.append(document.createTextNode(text.slice(last, match.index)));
+        if (match[1]) {
+          const code = document.createElement("code");
+          code.textContent = match[1].slice(1, -1);
+          parent.append(code);
+        } else if (match[2]) {
+          const strong = document.createElement("strong");
+          strong.textContent = match[2].slice(2, -2);
+          parent.append(strong);
+        } else if (match[3]) {
+          const em = document.createElement("em");
+          em.textContent = match[3].slice(1, -1);
+          parent.append(em);
+        } else if (match[4]) {
+          const link = match[4].match(/^\[([^\]]+)\]\(([^)\s]+)\)$/);
+          if (link && /^(https?:|mailto:)/i.test(link[2])) {
+            const anchor = document.createElement("a");
+            anchor.href = link[2];
+            anchor.rel = "noreferrer noopener";
+            anchor.target = "_blank";
+            anchor.textContent = link[1];
+            parent.append(anchor);
+          } else {
+            parent.append(document.createTextNode(link ? link[1] : match[4]));
+          }
+        }
+        last = match.index + match[0].length;
+      }
+      if (last < text.length) parent.append(document.createTextNode(text.slice(last)));
+    }
+
+    function codeBlock(lang, code) {
+      const wrap = document.createElement("div");
+      wrap.className = "codeblock";
+      const bar = document.createElement("div");
+      bar.className = "codebar";
+      const label = document.createElement("span");
+      label.textContent = lang || "code";
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "copy";
+      button.textContent = "Copier";
+      button.addEventListener("click", function () {
+        copyText(code).then(function () {
+          button.textContent = "Copié";
+          setTimeout(function () { button.textContent = "Copier"; }, 1500);
+        }, function () {
+          button.textContent = "Échec";
+        });
+      });
+      bar.append(label, button);
+      const pre = document.createElement("pre");
+      const codeEl = document.createElement("code");
+      codeEl.textContent = code;
+      pre.append(codeEl);
+      wrap.append(bar, pre);
+      return wrap;
+    }
+
+    function renderMarkdown(container, src) {
+      container.replaceChildren();
+      const lines = String(src || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+      let index = 0;
+      while (index < lines.length) {
+        const line = lines[index];
+        const fence = line.match(/^```([A-Za-z0-9_+-]*)\s*$/);
+        if (fence) {
+          const lang = fence[1];
+          const body = [];
+          index += 1;
+          while (index < lines.length && !/^```\s*$/.test(lines[index])) {
+            body.push(lines[index]);
+            index += 1;
+          }
+          if (index < lines.length) index += 1;
+          container.append(codeBlock(lang, body.join("\n")));
+          continue;
+        }
+        const heading = line.match(/^(#{1,6})\s+(.*)$/);
+        if (heading) {
+          const title = document.createElement("h" + heading[1].length);
+          appendInlines(title, heading[2]);
+          container.append(title);
+          index += 1;
+          continue;
+        }
+        if (/^(---|\*\*\*|___)\s*$/.test(line)) {
+          container.append(document.createElement("hr"));
+          index += 1;
+          continue;
+        }
+        if (/^\s*([-*]|\d+\.)\s+/.test(line)) {
+          const ordered = /^\s*\d+\.\s+/.test(line);
+          const list = document.createElement(ordered ? "ol" : "ul");
+          while (index < lines.length && /^\s*([-*]|\d+\.)\s+/.test(lines[index])) {
+            const item = document.createElement("li");
+            appendInlines(item, lines[index].replace(/^\s*([-*]|\d+\.)\s+/, ""));
+            list.append(item);
+            index += 1;
+          }
+          container.append(list);
+          continue;
+        }
+        if (/^>\s?/.test(line)) {
+          const quote = document.createElement("blockquote");
+          const parts = [];
+          while (index < lines.length && /^>\s?/.test(lines[index])) {
+            parts.push(lines[index].replace(/^>\s?/, ""));
+            index += 1;
+          }
+          appendInlines(quote, parts.join("\n"));
+          container.append(quote);
+          continue;
+        }
+        if (line.trim() === "") {
+          index += 1;
+          continue;
+        }
+        const parts = [];
+        while (index < lines.length && lines[index].trim() !== "" && !isBlockStart(lines[index])) {
+          parts.push(lines[index]);
+          index += 1;
+        }
+        const paragraph = document.createElement("p");
+        appendInlines(paragraph, parts.join(" "));
+        container.append(paragraph);
+      }
+    }
+
+    function addArticle(who, asMarkdown) {
+      const article = document.createElement("article");
+      const title = document.createElement("div");
+      title.className = "who";
+      title.textContent = who;
+      const body = document.createElement(asMarkdown ? "div" : "pre");
+      if (asMarkdown) body.className = "md";
+      article.append(title, body);
+      logEl.append(article);
+      return body;
+    }
+
+    function parseSse(block) {
+      let eventName = "message";
+      const dataLines = [];
+      for (const line of block.split("\n")) {
+        if (line.startsWith("event:")) eventName = line.slice(6).trim();
+        else if (line.startsWith("data:")) dataLines.push(line.slice(5).replace(/^ /, ""));
+      }
+      let data = {};
+      if (dataLines.length) {
+        try { data = JSON.parse(dataLines.join("\n")); }
+        catch (err) { data = { text: dataLines.join("\n") }; }
+      }
+      return { event: eventName, data: data };
+    }
+
+    function addTrace() {
+      const article = document.createElement("article");
+      const title = document.createElement("div");
+      title.className = "who";
+      title.textContent = "Déroulement";
+      const list = document.createElement("ol");
+      list.className = "trace";
+      article.append(title, list);
+      logEl.append(article);
+      return list;
+    }
+
+    function pushStep(trace, text) {
+      const item = document.createElement("li");
+      item.textContent = text;
+      trace.append(item);
+      return item;
+    }
+
+    async function ask(query) {
+      const token = tokenInput.value;
+      if (!token) {
+        setStatus("Indiquez le jeton avant d'envoyer.", true);
+        return;
+      }
+      const question = addArticle("Vous");
+      question.textContent = query;
+      const trace = addTrace();
+      const answer = addArticle("Assistant", true);
+      const state = { writing: false, answer: "", draft: "", liveTools: {} };
+      pushStep(trace, "Analyse de la question…");
+      const extra = document.getElementById("instructions").value.trim();
+      document.getElementById("query").value = "";
+      document.getElementById("instructions").value = "";
+      sendBtn.disabled = true;
+      stopBtn.disabled = false;
+      abortController = new AbortController();
+      setStatus("Analyse de la question…");
+      const payload = { query: query };
+      if (extra) payload.instructions = extra;
+      if (conversationId) payload.conversation_id = conversationId;
+      try {
+        const resp = await fetch("/chat/stream", {
+          method: "POST",
+          headers: {
+            "Authorization": "Bearer " + token,
+            "Content-Type": "application/json",
+            "Accept": "text/event-stream"
+          },
+          body: JSON.stringify(payload),
+          signal: abortController.signal
+        });
+        if (!resp.ok) {
+          const detail = await resp.text();
+          setStatus(resp.status + " " + detail, true);
+          return;
+        }
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        while (true) {
+          const chunk = await reader.read();
+          if (chunk.done) break;
+          buffer += decoder.decode(chunk.value, { stream: true });
+          let cut;
+          while ((cut = buffer.indexOf("\n\n")) !== -1) {
+            const raw = buffer.slice(0, cut);
+            buffer = buffer.slice(cut + 2);
+            applyEvent(parseSse(raw), answer, trace, state);
+          }
+        }
+        if (statusEl.className !== "error") setStatus("");
+      } catch (err) {
+        if (err.name === "AbortError") setStatus("Calcul arrêté.");
+        else setStatus(String(err), true);
+      } finally {
+        sendBtn.disabled = false;
+        stopBtn.disabled = true;
+        abortController = null;
+      }
+    }
+
+    function applyEvent(message, answer, trace, state) {
+      const data = message.data || {};
+      if (message.event === "meta" && data.conversation_id) {
+        conversationId = data.conversation_id;
+        renderConv();
+      } else if (message.event === "context") {
+        const pct = Math.round((Number(data.ratio) || 0) * 100);
+        contextEl.textContent = "Contexte " + pct + " % (" + (data.used || 0) + " / " + (data.window || 0) + " tokens)";
+        contextBar.style.width = Math.min(100, pct) + "%";
+        if (data.compressed) pushStep(trace, "Le modèle a résumé l'historique pour rester dans la fenêtre.");
+      } else if (message.event === "activity" && data.phase === "generating") {
+        pushStep(trace, "Le modèle génère…");
+        setStatus("Le modèle génère…");
+      } else if (message.event === "token") {
+        if (!state.writing) {
+          state.writing = true;
+          pushStep(trace, "Le modèle rédige…");
+          setStatus("Le modèle rédige…");
+        }
+        state.draft += data.text || "";
+        renderMarkdown(answer, state.answer + state.draft);
+      } else if (message.event === "tool_delta") {
+        if (state.draft) {
+          const thought = pushStep(trace, "Raisonnement");
+          const pre = document.createElement("pre");
+          pre.textContent = state.draft;
+          thought.append(pre);
+          state.draft = "";
+          state.writing = false;
+          renderMarkdown(answer, state.answer);
+        }
+        const index = data.index == null ? 0 : data.index;
+        let item = state.liveTools[index];
+        if (!item) {
+          item = pushStep(trace, "");
+          item.dataset.name = data.name || "";
+          const args = document.createElement("pre");
+          args.className = "tool-args";
+          item.append(args);
+          state.liveTools[index] = item;
+        }
+        item.dataset.name = data.name || item.dataset.name || "";
+        item.firstChild.textContent = "Outil en préparation : " + (item.dataset.name || "…");
+        const args = item.querySelector("pre.tool-args");
+        if (args) args.textContent = data.arguments || "";
+        setStatus("Le modèle prépare " + (item.dataset.name || "un outil") + "…");
+      } else if (message.event === "tool_call") {
+        const args = JSON.stringify(data.arguments || {});
+        const live = Object.values(state.liveTools).find(function (item) {
+          return item.dataset.name === data.name && !item.dataset.running;
+        });
+        if (live) {
+          live.dataset.running = "1";
+          live.firstChild.textContent = "Outil en cours : " + (data.name || "");
+        } else {
+          pushStep(trace, "Le modèle appelle " + (data.name || "un outil") + " " + args);
+        }
+        setStatus("Outil " + (data.name || "") + " en cours…");
+      } else if (message.event === "tool_result") {
+        const summary = data.result_summary || "";
+        const live = Object.values(state.liveTools).find(function (item) {
+          return item.dataset.name === data.name && item.dataset.running === "1" && !item.dataset.done;
+        });
+        const item = live || pushStep(trace, "");
+        if (live) {
+          delete state.liveTools[Object.keys(state.liveTools).find(function (key) {
+            return state.liveTools[key] === live;
+          })];
+        }
+        item.dataset.done = "1";
+        item.firstChild.textContent = (data.ok ? "Outil réussi : " : "Outil en échec : ") + (data.name || "");
+        if (summary.length > 180) {
+          const details = document.createElement("details");
+          const summaryEl = document.createElement("summary");
+          summaryEl.textContent = "Journal (" + summary.length + " caractères)";
+          const pre = document.createElement("pre");
+          pre.textContent = summary;
+          details.append(summaryEl, pre);
+          item.append(details);
+        } else if (summary) {
+          item.append(document.createTextNode(" — " + summary));
+        }
+        setStatus("Outil " + (data.name || "") + " terminé.");
+      } else if (message.event === "route") {
+        const direct = data.route === "direct";
+        const ranked = data.by === "model" ? ", d'après le classement" : "";
+        pushStep(
+          trace,
+          direct
+            ? "Question générale" + ranked + " : réponse directe, sans recherche ni outils."
+            : "Question sur le dépôt" + ranked + " : recherche dans l'index, outils disponibles."
+        );
+        setStatus(direct ? "Le modèle rédige…" : "Recherche dans l'index…");
+      } else if (message.event === "rag") {
+        const sources = data.sources || [];
+        const item = pushStep(
+          trace,
+          data.used_context
+            ? "Contexte retrouvé (" + (data.num_sources || sources.length) + ")."
+            : "Pas de contexte indexé. Le modèle répond sans extrait du dépôt."
+        );
+        if (sources.length) {
+          const list = document.createElement("ul");
+          list.className = "sources";
+          for (const source of sources) {
+            const line = document.createElement("li");
+            if (source && typeof source === "object") {
+              const symbol = source.symbol_name ? " " + source.symbol_name : "";
+              line.textContent = source.file_path + ":" + source.start_line + "-" + source.end_line + symbol;
+            } else {
+              line.textContent = String(source);
+            }
+            list.append(line);
+          }
+          item.append(list);
+        }
+        setStatus("Le modèle choisit quoi faire…");
+      } else if (message.event === "done") {
+        if (data.conversation_id) {
+          conversationId = data.conversation_id;
+          renderConv();
+        }
+        if (data.answer) {
+          state.answer = data.answer;
+          state.draft = "";
+          renderMarkdown(answer, state.answer);
+        }
+        setStatus("");
+      } else if (message.event === "error") {
+        setStatus(data.message || "erreur", true);
+      }
+    }
+
+  </script>
+</body>
+</html>

@@ -1,0 +1,38 @@
+# syntax=docker/dockerfile:1
+# Pinned per CONTRACTS.md ("C++ toolchain base"): ubuntu:24.04 (gcc/g++ 13,
+# cmake 3.28.3 via apt) - matches the target deployment OS of the real C++
+# project this stack builds/tests against.
+
+# ---------------------------------------------------------------- builder --
+FROM ubuntu:24.04 AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        cmake \
+        libcurl4-openssl-dev \
+        nlohmann-json3-dev \
+        catch2 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace/app
+COPY app/ ./
+
+RUN cmake --preset release
+RUN cmake --build --preset release
+# Build-time test gate: fail the image build if unit tests don't pass.
+RUN ctest --preset release
+
+# ---------------------------------------------------------------- runtime --
+FROM ubuntu:24.04 AS runtime
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libcurl4 \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --system app && useradd --system --gid app --create-home --home-dir /home/app app
+
+COPY --from=builder /workspace/app/build/release/llm-client /usr/local/bin/llm-client
+
+USER app
+WORKDIR /home/app
+
+ENTRYPOINT ["/usr/local/bin/llm-client"]

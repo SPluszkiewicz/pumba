@@ -1,0 +1,400 @@
+{
+  "checkout": "D:/rest/opencv",
+  "note": "Questions for the local OpenCV tree. Each expected path was checked on disk, and each expected symbol occurs in that file. They were not chosen by looking at retrieval results. A low hit@5 is a measurement, not a failed build. expected_file_exact requires the indexed path to be that file, so a nested README.md does not count.",
+  "questions": [
+    {
+      "id": "mat-decl",
+      "family": "symbol",
+      "query": "Where is class cv::Mat declared?",
+      "expected_file_substring": "modules/core/include/opencv2/core/mat.hpp",
+      "expected_symbol_substring": "Mat"
+    },
+    {
+      "id": "imread-def",
+      "family": "symbol",
+      "query": "Where is cv::imread defined?",
+      "expected_file_substring": "modules/imgcodecs/src/loadsave.cpp",
+      "expected_symbol_substring": "imread"
+    },
+    {
+      "id": "gaussian-def",
+      "family": "symbol",
+      "query": "Where is cv::GaussianBlur defined?",
+      "expected_file_substring": "modules/imgproc/src/smooth.dispatch.cpp",
+      "expected_symbol_substring": "GaussianBlur"
+    },
+    {
+      "id": "cvtcolor-def",
+      "family": "symbol",
+      "query": "Where is cv::cvtColor defined?",
+      "expected_file_substring": "modules/imgproc/src/color.cpp",
+      "expected_symbol_substring": "cvtColor"
+    },
+    {
+      "id": "contours-def",
+      "family": "symbol",
+      "query": "Where is cv::findContours defined?",
+      "expected_file_substring": "modules/imgproc/src/contours_new.cpp",
+      "expected_symbol_substring": "findContours"
+    },
+    {
+      "id": "dft-decl",
+      "family": "symbol",
+      "query": "Where is cv::dft declared?",
+      "expected_file_substring": "modules/core/include/opencv2/core.hpp"
+    },
+    {
+      "id": "videocapture-open",
+      "family": "symbol",
+      "query": "Where is VideoCapture::open defined?",
+      "expected_file_substring": "modules/videoio/src/cap.cpp"
+    },
+    {
+      "id": "resize-def",
+      "family": "symbol",
+      "query": "Where is cv::resize defined?",
+      "expected_file_substring": "modules/imgproc/src/resize.cpp",
+      "expected_symbol_substring": "resize"
+    },
+    {
+      "id": "canny-decl",
+      "family": "symbol",
+      "query": "Where is cv::Canny declared?",
+      "expected_file_substring": "modules/imgproc/include/opencv2/imgproc.hpp",
+      "expected_symbol_substring": "Canny"
+    },
+    {
+      "id": "canny-def",
+      "family": "symbol",
+      "query": "Where is cv::Canny defined?",
+      "expected_file_substring": "modules/imgproc/src/canny.cpp",
+      "expected_symbol_substring": "Canny"
+    },
+    {
+      "id": "thresh-def",
+      "family": "symbol",
+      "query": "Where is cv::threshold defined?",
+      "expected_file_substring": "modules/imgproc/src/thresh.cpp",
+      "expected_symbol_substring": "threshold"
+    },
+    {
+      "id": "warp-def",
+      "family": "symbol",
+      "query": "Where is cv::warpPerspective defined?",
+      "expected_file_substring": "modules/imgproc/src/imgwarp.cpp",
+      "expected_symbol_substring": "warpPerspective"
+    },
+    {
+      "id": "hist-def",
+      "family": "symbol",
+      "query": "Where is cv::calcHist defined?",
+      "expected_file_substring": "modules/imgproc/src/histogram.cpp",
+      "expected_symbol_substring": "calcHist"
+    },
+    {
+      "id": "hough-def",
+      "family": "symbol",
+      "query": "Where is cv::HoughLines defined?",
+      "expected_file_substring": "modules/imgproc/src/hough.cpp",
+      "expected_symbol_substring": "HoughLines"
+    },
+    {
+      "id": "bilateral-def",
+      "family": "symbol",
+      "query": "Where is cv::bilateralFilter defined?",
+      "expected_file_substring": "modules/imgproc/src/bilateral_filter.dispatch.cpp",
+      "expected_symbol_substring": "bilateralFilter"
+    },
+    {
+      "id": "morph-def",
+      "family": "symbol",
+      "query": "Where is cv::morphologyEx defined?",
+      "expected_file_substring": "modules/imgproc/src/morph.dispatch.cpp",
+      "expected_symbol_substring": "morphologyEx"
+    },
+    {
+      "id": "matchtpl-def",
+      "family": "symbol",
+      "query": "Where is cv::matchTemplate defined?",
+      "expected_file_substring": "modules/imgproc/src/templmatch.cpp",
+      "expected_symbol_substring": "matchTemplate"
+    },
+    {
+      "id": "gftt-def",
+      "family": "symbol",
+      "query": "Where is cv::goodFeaturesToTrack defined?",
+      "expected_file_substring": "modules/imgproc/src/featureselect.cpp",
+      "expected_symbol_substring": "goodFeaturesToTrack"
+    },
+    {
+      "id": "ccl-def",
+      "family": "symbol",
+      "query": "Where is cv::connectedComponents defined?",
+      "expected_file_substring": "modules/imgproc/src/connectedcomponents.cpp",
+      "expected_symbol_substring": "connectedComponents"
+    },
+    {
+      "id": "puttext-def",
+      "family": "symbol",
+      "query": "Where is cv::putText defined?",
+      "expected_file_substring": "modules/imgproc/src/drawing.cpp",
+      "expected_symbol_substring": "putText"
+    },
+    {
+      "id": "calib-def",
+      "family": "symbol",
+      "query": "Where is cv::calibrateCamera defined?",
+      "expected_file_substring": "modules/calib3d/src/calibration.cpp",
+      "expected_symbol_substring": "calibrateCamera"
+    },
+    {
+      "id": "pnp-def",
+      "family": "symbol",
+      "query": "Where is cv::solvePnP defined?",
+      "expected_file_substring": "modules/calib3d/src/solvepnp.cpp",
+      "expected_symbol_substring": "solvePnP"
+    },
+    {
+      "id": "homography-def",
+      "family": "symbol",
+      "query": "Where is cv::findHomography defined?",
+      "expected_file_substring": "modules/calib3d/src/fundam.cpp",
+      "expected_symbol_substring": "findHomography"
+    },
+    {
+      "id": "lk-def",
+      "family": "symbol",
+      "query": "Where is cv::calcOpticalFlowPyrLK defined?",
+      "expected_file_substring": "modules/video/src/lkpyramid.cpp",
+      "expected_symbol_substring": "calcOpticalFlowPyrLK"
+    },
+    {
+      "id": "camshift-def",
+      "family": "symbol",
+      "query": "Where is cv::CamShift defined?",
+      "expected_file_substring": "modules/video/src/camshift.cpp",
+      "expected_symbol_substring": "CamShift"
+    },
+    {
+      "id": "inpaint-def",
+      "family": "symbol",
+      "query": "Where is cv::inpaint defined?",
+      "expected_file_substring": "modules/photo/src/inpaint.cpp",
+      "expected_symbol_substring": "inpaint"
+    },
+    {
+      "id": "denoise-def",
+      "family": "symbol",
+      "query": "Where is cv::fastNlMeansDenoising defined?",
+      "expected_file_substring": "modules/photo/src/denoising.cpp",
+      "expected_symbol_substring": "fastNlMeansDenoising"
+    },
+    {
+      "id": "imshow-decl",
+      "family": "symbol",
+      "query": "Where is cv::imshow declared?",
+      "expected_file_substring": "modules/highgui/include/opencv2/highgui.hpp",
+      "expected_symbol_substring": "imshow"
+    },
+    {
+      "id": "imshow-def",
+      "family": "symbol",
+      "query": "Where is cv::imshow defined?",
+      "expected_file_substring": "modules/highgui/src/window.cpp",
+      "expected_symbol_substring": "imshow"
+    },
+    {
+      "id": "kmeans-def",
+      "family": "symbol",
+      "query": "Where is cv::kmeans defined?",
+      "expected_file_substring": "modules/core/src/kmeans.cpp",
+      "expected_symbol_substring": "kmeans"
+    },
+    {
+      "id": "reshape-def",
+      "family": "symbol",
+      "query": "Where is Mat::reshape defined?",
+      "expected_file_substring": "modules/core/src/matrix.cpp",
+      "expected_symbol_substring": "reshape"
+    },
+    {
+      "id": "storage-def",
+      "family": "symbol",
+      "query": "Where is FileStorage::open defined?",
+      "expected_file_substring": "modules/core/src/persistence.cpp",
+      "expected_symbol_substring": "FileStorage::open"
+    },
+    {
+      "id": "parallel-def",
+      "family": "symbol",
+      "query": "Where is cv::parallel_for_ defined?",
+      "expected_file_substring": "modules/core/src/parallel.cpp",
+      "expected_symbol_substring": "parallel_for_"
+    },
+    {
+      "id": "cascade-def",
+      "family": "symbol",
+      "query": "Where is CascadeClassifier::detectMultiScale defined?",
+      "expected_file_substring": "modules/objdetect/src/cascadedetect.cpp",
+      "expected_symbol_substring": "detectMultiScale"
+    },
+    {
+      "id": "onnx-def",
+      "family": "symbol",
+      "query": "Where is cv::dnn::readNetFromONNX defined?",
+      "expected_file_substring": "modules/dnn/src/onnx/onnx_importer.cpp",
+      "expected_symbol_substring": "readNetFromONNX"
+    },
+    {
+      "id": "readnet-def",
+      "family": "symbol",
+      "query": "Where is cv::dnn::readNet defined?",
+      "expected_file_substring": "modules/dnn/src/dnn_read.cpp",
+      "expected_symbol_substring": "readNet"
+    },
+    {
+      "id": "orb-def",
+      "family": "symbol",
+      "query": "Where is ORB::create defined?",
+      "expected_file_substring": "modules/features2d/src/orb.cpp",
+      "expected_symbol_substring": "ORB::create"
+    },
+    {
+      "id": "knnmatch-def",
+      "family": "symbol",
+      "query": "Where is DescriptorMatcher::knnMatch defined?",
+      "expected_file_substring": "modules/features2d/src/matchers.cpp",
+      "expected_symbol_substring": "knnMatch"
+    },
+    {
+      "id": "stitch-def",
+      "family": "symbol",
+      "query": "Where is Stitcher::stitch defined?",
+      "expected_file_substring": "modules/stitching/src/stitcher.cpp",
+      "expected_symbol_substring": "Stitcher::stitch"
+    },
+    {
+      "id": "svm-def",
+      "family": "symbol",
+      "query": "Where is cv::ml::SVM::create defined?",
+      "expected_file_substring": "modules/ml/src/svm.cpp",
+      "expected_symbol_substring": "SVM::create"
+    },
+    {
+      "id": "flann-def",
+      "family": "symbol",
+      "query": "Where is cv::flann::Index::knnSearch defined?",
+      "expected_file_substring": "modules/flann/src/miniflann.cpp",
+      "expected_symbol_substring": "knnSearch"
+    },
+    {
+      "id": "read-image",
+      "family": "behavior",
+      "query": "Where is an image file read from a filesystem path into a matrix?",
+      "expected_file_substring": "modules/imgcodecs/src/loadsave.cpp"
+    },
+    {
+      "id": "color-space",
+      "family": "behavior",
+      "query": "Where is an image converted from one color space to another?",
+      "expected_file_substring": "modules/imgproc/src/color.cpp"
+    },
+    {
+      "id": "outlines",
+      "family": "behavior",
+      "query": "Where are the outlines of connected regions extracted from a binary image?",
+      "expected_file_substring": "modules/imgproc/src/contours_new.cpp"
+    },
+    {
+      "id": "open-video",
+      "family": "behavior",
+      "query": "Where is a video file or a camera device opened?",
+      "expected_file_substring": "modules/videoio/src/cap.cpp"
+    },
+    {
+      "id": "bell-blur",
+      "family": "behavior",
+      "query": "Where is an image smoothed with a bell-shaped kernel?",
+      "expected_file_substring": "modules/imgproc/src/smooth.dispatch.cpp"
+    },
+    {
+      "id": "calib-views",
+      "family": "behavior",
+      "query": "Where is a camera intrinsic matrix estimated from views of a calibration pattern?",
+      "expected_file_substring": "modules/calib3d/src/calibration.cpp"
+    },
+    {
+      "id": "panorama",
+      "family": "behavior",
+      "query": "Where are several images combined into one panorama?",
+      "expected_file_substring": "modules/stitching/src/stitcher.cpp"
+    },
+    {
+      "id": "similar-patches",
+      "family": "behavior",
+      "query": "Where is noise removed by averaging similar patches in an image?",
+      "expected_file_substring": "modules/photo/src/denoising.cpp"
+    },
+    {
+      "id": "pyramid-flow",
+      "family": "behavior",
+      "query": "Where is sparse optical flow tracked from one image to the next?",
+      "expected_file_substring": "modules/video/src/lkpyramid.cpp"
+    },
+    {
+      "id": "path-mat",
+      "family": "path",
+      "query": "What does modules/core/include/opencv2/core/mat.hpp declare?",
+      "expected_file_substring": "modules/core/include/opencv2/core/mat.hpp"
+    },
+    {
+      "id": "path-loadsave",
+      "family": "path",
+      "query": "What does modules/imgcodecs/src/loadsave.cpp implement?",
+      "expected_file_substring": "modules/imgcodecs/src/loadsave.cpp"
+    },
+    {
+      "id": "path-cmake-core",
+      "family": "path",
+      "query": "What does modules/core/CMakeLists.txt configure?",
+      "expected_file_substring": "modules/core/CMakeLists.txt"
+    },
+    {
+      "id": "cmake-macro",
+      "family": "cmake",
+      "query": "Where is the CMake macro ocv_add_module defined?",
+      "expected_file_substring": "cmake/OpenCVModule.cmake"
+    },
+    {
+      "id": "cmake-core",
+      "family": "cmake",
+      "query": "Where is ocv_add_module called for the core module?",
+      "expected_file_substring": "modules/core/CMakeLists.txt"
+    },
+    {
+      "id": "readme-pr",
+      "family": "docs",
+      "query": "Where does the README say to use one pull request per issue?",
+      "expected_file_substring": "README.md",
+      "expected_file_exact": true
+    },
+    {
+      "id": "absent",
+      "family": "negative",
+      "query": "Where is Zorglub42 declared?",
+      "expect_absent_symbol": "Zorglub42"
+    },
+    {
+      "id": "absent-unblur",
+      "family": "negative",
+      "query": "Where is cv::GaussianUnblur defined?",
+      "expect_absent_symbol": "GaussianUnblur"
+    },
+    {
+      "id": "absent-3d",
+      "family": "negative",
+      "query": "Where is cv::findContours3D declared?",
+      "expect_absent_symbol": "findContours3D"
+    }
+  ]
+}

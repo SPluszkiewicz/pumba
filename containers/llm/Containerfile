@@ -1,0 +1,118 @@
+# containers/llm/Containerfile
+#
+# Builds llama.cpp's `llama-server` to serve the chat model
+# (bartowski/Qwen2.5-Coder-14B-Instruct-GGUF, Q5_K_M) with an OpenAI-compatible API.
+#
+# All versions/ports/paths below are pinned per CONTRACTS.md -
+# do not bump without updating that file too.
+#
+# Build with GPU support (default):
+#   podman build -t llm --build-arg GPU=1 -f containers/llm/Containerfile .
+# Build CPU-only:
+#   podman build -t llm --build-arg GPU=0 -f containers/llm/Containerfile .
+
+ARG GPU=1
+
+# ---------------------------------------------------------------------------
+# Builder base image selection (CUDA devel vs plain Ubuntu), per CONTRACTS.md
+# ---------------------------------------------------------------------------
+FROM nvidia/cuda:12.6.3-devel-ubuntu24.04 AS builder-base-1
+FROM ubuntu:24.04 AS builder-base-0
+
+FROM builder-base-${GPU} AS builder
+
+ARG GPU
+# Common CUDA compute capabilities to build for when GPU=1 (Turing -> Hopper).
+# ASSUMPTION: adjust to the actual target GPU(s) if build time/size matters.
+ARG CUDA_ARCHITECTURES="75;80;86;89;90"
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        cmake \
+        git \
+        ca-certificates \
+        pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+
+# The CUDA devel image ships driver *stubs*, not the real libcuda.so.1
+# (the host driver is injected at runtime via CDI). llama.cpp now links the
+# CUDA driver API (cuMem*), so the linker needs that stub on LIBRARY_PATH
+# or the final llama-server link fails with "libcuda.so.1: not found".
+# Harmless on the CPU (GPU=0) build: the path simply does not exist.
+ENV LIBRARY_PATH=/usr/local/cuda/lib64/stubs
+
+# llama.cpp checkout pinned per CONTRACTS.md - do not bump without updating that file too.
+RUN git clone --branch b10216 --depth 1 https://github.com/ggml-org/llama.cpp
+
+RUN set -eux; \
+    CMAKE_EXTRA=""; \
+    if [ "$GPU" = "1" ]; then \
+        CMAKE_EXTRA="-DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=${CUDA_ARCHITECTURES}"; \
+        # ld resolves libcuda.so.1 via the default search path / rpath-link,
+        # not LIBRARY_PATH, when it's a DT_NEEDED of libggml-cuda.so. Put the
+        # stub where the linker always looks, and also pass rpath-link.
+        ln -sf /usr/local/cuda/lib64/stubs/libcuda.so /usr/lib/x86_64-linux-gnu/libcuda.so.1; \
+        CMAKE_EXTRA="${CMAKE_EXTRA} -DCMAKE_EXE_LINKER_FLAGS=-Wl,-rpath-link,/usr/local/cuda/lib64/stubs"; \
+    fi; \
+    cmake -S llama.cpp -B build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_SHARED_LIBS=ON \
+        -DLLAMA_CURL=OFF \
+        ${CMAKE_EXTRA}; \
+    cmake --build build --target llama-server --config Release -j"$(nproc)"
+
+# Collect the server binary + every shared lib cmake produced (libggml*.so,
+# libllama*.so, backend .so's) so the runtime stage can copy just this dir.
+RUN mkdir -p /out/bin && \
+    find build/bin -maxdepth 1 \( -name 'llama-server' -o -name '*.so*' \) -exec cp -a {} /out/bin/ \;
+
+# ---------------------------------------------------------------------------
+# Runtime base image selection, per CONTRACTS.md
+# ---------------------------------------------------------------------------
+FROM nvidia/cuda:12.6.3-runtime-ubuntu24.04 AS runtime-base-1
+FROM ubuntu:24.04 AS runtime-base-0
+
+FROM runtime-base-${GPU} AS runtime
+
+ARG GPU
+ENV DEBIAN_FRONTEND=noninteractive
+
+# curl: used only by the container HEALTHCHECK below to probe /health.
+# libgomp1: OpenMP runtime needed by ggml's CPU backend (used even in GPU
+# builds for CPU-side ops/offload fallback).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl \
+        libgomp1 \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && (useradd --create-home --uid 1000 --shell /usr/sbin/nologin llamauser \
+        || useradd --create-home --shell /usr/sbin/nologin llamauser)
+
+WORKDIR /app
+COPY --from=builder /out/bin/ /app/
+COPY containers/llm/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh /app/llama-server && \
+    mkdir -p /models && chown -R llamauser:llamauser /app /models
+
+ENV LD_LIBRARY_PATH=/app
+ENV PATH="/app:${PATH}"
+
+# Defaults per CONTRACTS.md - overridable at runtime via compose `environment:`.
+ENV LLM_MODEL_PATH=/models/Qwen2.5-Coder-14B-Instruct-Q5_K_M.gguf
+ENV LLM_PORT=8080
+# Baked-in GPU/CPU default for -ngl, read by entrypoint.sh; LLM_NGL (if set at
+# runtime) always takes precedence over this.
+ENV LLM_GPU_BUILD=${GPU}
+
+USER llamauser
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+    CMD curl -fsS "http://localhost:${LLM_PORT}/health" || exit 1
+
+ENTRYPOINT ["/entrypoint.sh"]

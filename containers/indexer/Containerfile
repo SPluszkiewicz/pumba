@@ -1,0 +1,30 @@
+# Batch indexing job: chunks the C++ source tree, embeds via `embedder`, and
+# upserts into Qdrant's `code_chunks` collection. Runs under the `index`
+# compose profile (one-shot by default; `--watch` can be appended via
+# compose's `command:` override - see services/indexer/main.py).
+FROM python:3.11-slim-bookworm
+
+RUN useradd --create-home --uid 10001 indexer
+
+WORKDIR /app
+
+COPY services/indexer/requirements.txt ./requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY services/indexer/ ./
+# Shared structured logging (`from common.logging import get_logger`).
+COPY services/common/ ./common/
+
+USER indexer
+
+# core-net has no internet. tree-sitter-language-pack downloads grammars on
+# first use, so fetch the ones text_chunker.py needs while this build still
+# has a network. The cache lives in the indexer user's home.
+RUN python -c "from tree_sitter_language_pack import prefetch; prefetch(['markdown', 'cmake', 'yaml', 'json', 'toml'])"
+
+# `app/` is bind-mounted read-only at /workspace/app by compose.yaml
+# (INDEXER_SOURCE_ROOT). No CMD arguments here so `command: ["python",
+# "main.py", "--watch"]` can be layered on in compose without editing this
+# file.
+ENTRYPOINT ["python", "main.py"]
+CMD []

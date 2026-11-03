@@ -1,0 +1,160 @@
+# CI for the local_llm stack.
+#
+# Two tiers, mirroring docs/guides/testing.md:
+#   unit   - lint + type-check + every pytest suite + the C++ ctest suite.
+#            Needs no model file, no GPU, no Podman: runs on the plain runner
+#            with the same pins the devtools image uses (Python 3.11,
+#            Ubuntu 24.04 toolchain).
+#   smoke  - the real containerized end-to-end test (`deploy.py test`) with
+#            the tiny CPU chat model, then the RAG golden-question eval.
+#            Slow (image builds + ~0.5 GB of models), so it runs on push to
+#            the default branch, nightly, and on demand - not on every PR.
+#
+# Only GitHub is wired here; the same two commands work verbatim in GitLab
+# CI or a local cron: `pytest` / `python scripts/deploy.py test`.
+
+name: ci
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  schedule:
+    - cron: "17 3 * * *"   # nightly smoke
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    name: lint + unit tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Guard against CRLF in shell/entrypoint files
+        # The kernel looks for `sh\r` if a shebang line ends in CRLF and the
+        # container dies with "No such file or directory". .gitattributes
+        # forces LF, this makes sure nobody bypassed it.
+        run: |
+          set -euo pipefail
+          bad=$(git ls-files -z '*.sh' '*.sample' 'containers/*/Containerfile' \
+                | xargs -0 grep -lP '\r$' || true)
+          if [ -n "$bad" ]; then echo "CRLF line endings in:"; echo "$bad"; exit 1; fi
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            services/*/requirements.txt
+            .github/workflows/ci.yml
+
+      - name: Install service dependencies (agent, indexer, tools, trainer-dataset) + tooling
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r services/agent/requirements.txt \
+                      -r services/indexer/requirements.txt \
+                      -r services/tools/requirements.txt \
+                      -r services/mcp/requirements.txt
+          # huggingface_hub: scripts/container/fetch_models.py (tests mock the download itself).
+          # Pins match scripts/host/install_deps.py TOOLING_PACKAGES.
+          # pytest-asyncio is required by pytest.ini (`asyncio_mode = auto`).
+          pip install pytest==8.3.4 pytest-asyncio==0.25.2 \
+                      ruff==0.14.10 mypy==1.19.1 pyyaml huggingface_hub
+
+      - name: ruff
+        run: ruff check .
+
+      - name: mypy (per service - flat module trees would otherwise collide on main.py)
+        run: |
+          set -e
+          # The flat-layout agent imports the shared models as
+          # `common.tool_models`, hence MYPYPATH for that one only (with it
+          # set, `services.tools.*` would be visible twice - see pyproject.toml).
+          echo "== mypy services/agent"; MYPYPATH=services mypy services/agent
+          for d in services/indexer services/tools services/common services/trainer services/mcp services/patch scripts; do
+            echo "== mypy $d"; mypy "$d"
+          done
+
+      - name: Install the C++ toolchain the tools image pins (Ubuntu 24.04 apt defaults)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake libcurl4-openssl-dev nlohmann-json3-dev catch2 \
+            ripgrep clang-format clang-tidy cppcheck
+
+      - name: pytest (all unit suites; integration smoke excluded)
+        # Profile campaign (scripts/host/profile_campaign.py) needs the RTX 6000
+        # stack. It is not a CI job.
+        run: python -m pytest -q --ignore=tests/integration
+
+      - name: clang-format check (app/ and sample/)
+        run: |
+          find app sample -type f \( -name '*.cpp' -o -name '*.hpp' \) \
+            | xargs clang-format --dry-run --Werror --style=file
+
+      - name: C++ ctest (app/ and sample/)
+        run: |
+          cd app
+          cmake --preset release
+          cmake --build --preset release
+          ctest --preset release --output-on-failure
+          cd ../sample
+          cmake --preset release
+          cmake --build --preset release
+          ctest --preset release --output-on-failure
+
+  smoke:
+    name: containerized smoke + RAG eval (CPU, tiny model)
+    # Nightly, default-branch pushes and manual runs only - see header.
+    if: github.event_name != 'pull_request'
+    needs: unit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Podman + podman-compose
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y podman podman-compose
+          podman --version && podman compose version
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache model files used by the test profile
+        uses: actions/cache@v4
+        with:
+          path: |
+            models/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf
+            models/nomic-embed-text-v1.5.Q8_0.gguf
+          key: test-models-${{ hashFiles('scripts/container/fetch_models.py') }}
+
+      - name: End-to-end smoke test (deploy.py test == docs/guides/testing.md)
+        run: python scripts/deploy.py test
+
+      - name: RAG golden-question eval
+        # deploy.py test tears the stack down; bring the core back up with the
+        # test env, index, evaluate, tear down.
+        run: |
+          set -e
+          podman compose --env-file .env.test up -d qdrant llm embedder tools agent
+          python - <<'PY'
+          import subprocess, time, sys
+          for _ in range(60):
+              out = subprocess.run(["podman","compose","--env-file",".env.test","ps","--format","json"],
+                                   capture_output=True, text=True).stdout
+              if out.count('"healthy"') >= 5:
+                  sys.exit(0)
+              time.sleep(5)
+          print("services did not become healthy in time", file=sys.stderr); sys.exit(1)
+          PY
+          podman compose --env-file .env.test --profile index run --rm indexer
+          podman compose --env-file .env.test run --rm devtools python scripts/container/eval_rag.py
+          podman compose --env-file .env.test down

@@ -1,0 +1,51 @@
+# containers/trainer/Containerfile
+#
+# GPU QLoRA training image. One-shot via compose profile `train`.
+# Pins llama.cpp b10216 for convert_lora_to_gguf.py (same tag as llm/embedder).
+
+FROM nvidia/cuda:12.6.3-devel-ubuntu24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git \
+        ca-certificates \
+        python3.11 \
+        python3.11-venv \
+        python3.11-dev \
+        python3-pip \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sf /usr/bin/python3.11 /usr/bin/python
+
+RUN python3.11 -m ensurepip --upgrade \
+    && python3.11 -m pip install --no-cache-dir --upgrade --ignore-installed pip setuptools wheel
+
+WORKDIR /opt
+RUN git clone --branch b10216 --depth 1 https://github.com/ggml-org/llama.cpp
+ENV LLAMA_CPP_DIR=/opt/llama.cpp
+
+WORKDIR /workspace/services/trainer
+
+COPY services/trainer/requirements.txt /tmp/requirements-trainer.txt
+COPY services/indexer/requirements.txt /tmp/requirements-indexer.txt
+RUN python3.11 -m pip install --no-cache-dir \
+        -r /tmp/requirements-trainer.txt \
+        -r /tmp/requirements-indexer.txt \
+    && rm -f /tmp/requirements-trainer.txt /tmp/requirements-indexer.txt
+
+COPY services/trainer/ /workspace/services/trainer/
+# chunker.py imports its siblings (chunker_types.py, text_chunker.py); the
+# grammars they need come from the indexer requirements installed above.
+COPY services/indexer/chunker.py services/indexer/chunker_types.py services/indexer/text_chunker.py \
+     /workspace/services/indexer/
+COPY services/common/ /workspace/services/common/
+COPY scripts/container/convert_lora.py /workspace/scripts/convert_lora.py
+
+RUN (useradd --create-home --uid 1000 --shell /usr/sbin/nologin trainer \
+    || useradd --create-home --shell /usr/sbin/nologin trainer) \
+    && mkdir -p /models /workspace/app \
+    && chown -R trainer:trainer /models /workspace
+
+USER trainer
+
+CMD ["python", "train.py"]

@@ -1,0 +1,22 @@
+[
+  {
+    "query": "How does the CLI send a question to the agent?",
+    "expected_file_substring": "src/AgentClient",
+    "expected_symbol_substring": null
+  },
+  {
+    "query": "Where is the program's entry point?",
+    "expected_file_substring": "src/main.cpp",
+    "expected_symbol_substring": "main"
+  },
+  {
+    "query": "Which CMake target links against libcurl and which C++ standard is required?",
+    "expected_file_substring": "CMakeLists.txt",
+    "expected_symbol_substring": null
+  },
+  {
+    "query": "What configure presets are defined for this project's build?",
+    "expected_file_substring": "CMakePresets.json",
+    "expected_symbol_substring": null
+  }
+]

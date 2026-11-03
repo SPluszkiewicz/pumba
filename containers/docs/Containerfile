@@ -1,0 +1,18 @@
+# Serves the docs-as-code site. Not part of the secured runtime path - this
+# is the one service allowed to publish a host port (see CONTRACTS.md).
+FROM python:3.11-slim-bookworm
+
+RUN useradd --create-home --uid 10001 docs
+RUN pip install --no-cache-dir \
+        mkdocs==1.6.1 \
+        mkdocs-material==9.5.49 \
+        pymdown-extensions==10.14
+
+USER docs
+WORKDIR /docs
+
+# mkdocs.yml + docs/ are bind-mounted at compose runtime (see compose.yaml)
+# so edits are reflected without rebuilding the image.
+EXPOSE 8000
+ENTRYPOINT ["mkdocs"]
+CMD ["serve", "--dev-addr", "0.0.0.0:8000"]

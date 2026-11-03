@@ -1,0 +1,117 @@
+# containers/embedder/Containerfile
+#
+# Builds llama.cpp's `llama-server` to serve the embedding model
+# (nomic-ai/nomic-embed-text-v1.5-GGUF, Q8_0) via the OpenAI-compatible
+# /v1/embeddings endpoint.
+#
+# All versions/ports/paths below are pinned per CONTRACTS.md -
+# do not bump without updating that file too.
+#
+# GPU defaults ON per CONTRACTS.md (`EMBEDDER_GPU_ARG=1`, 16 GB+ cards);
+# compose passes `${EMBEDDER_GPU_ARG:-1}` as this build arg. Set
+# `EMBEDDER_GPU_ARG=0` in `.env` to keep the embedder (and the reranker,
+# which shares this image) CPU-only when VRAM is tight.
+#
+# Build with GPU support (default):
+#   podman build -t embedder --build-arg GPU=1 -f containers/embedder/Containerfile .
+# Build CPU-only:
+#   podman build -t embedder --build-arg GPU=0 -f containers/embedder/Containerfile .
+
+ARG GPU=1
+
+# ---------------------------------------------------------------------------
+# Builder base image selection (CUDA devel vs plain Ubuntu), per CONTRACTS.md
+# ---------------------------------------------------------------------------
+FROM nvidia/cuda:12.6.3-devel-ubuntu24.04 AS builder-base-1
+FROM ubuntu:24.04 AS builder-base-0
+
+FROM builder-base-${GPU} AS builder
+
+ARG GPU
+# Common CUDA compute capabilities to build for when GPU=1 (Turing -> Hopper).
+# ASSUMPTION: adjust to the actual target GPU(s) if build time/size matters.
+ARG CUDA_ARCHITECTURES="75;80;86;89;90"
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        cmake \
+        git \
+        ca-certificates \
+        pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+
+# Same CUDA-driver-stub workaround as containers/llm/Containerfile - needed
+# if this image is ever built with GPU=1. Harmless on the default CPU build.
+ENV LIBRARY_PATH=/usr/local/cuda/lib64/stubs
+
+# llama.cpp checkout pinned per CONTRACTS.md - do not bump without updating that file too.
+RUN git clone --branch b10216 --depth 1 https://github.com/ggml-org/llama.cpp
+
+RUN set -eux; \
+    CMAKE_EXTRA=""; \
+    if [ "$GPU" = "1" ]; then \
+        CMAKE_EXTRA="-DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=${CUDA_ARCHITECTURES}"; \
+        ln -sf /usr/local/cuda/lib64/stubs/libcuda.so /usr/lib/x86_64-linux-gnu/libcuda.so.1; \
+        CMAKE_EXTRA="${CMAKE_EXTRA} -DCMAKE_EXE_LINKER_FLAGS=-Wl,-rpath-link,/usr/local/cuda/lib64/stubs"; \
+    fi; \
+    cmake -S llama.cpp -B build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_SHARED_LIBS=ON \
+        -DLLAMA_CURL=OFF \
+        ${CMAKE_EXTRA}; \
+    cmake --build build --target llama-server --config Release -j"$(nproc)"
+
+# Collect the server binary + every shared lib cmake produced (libggml*.so,
+# libllama*.so, backend .so's) so the runtime stage can copy just this dir.
+RUN mkdir -p /out/bin && \
+    find build/bin -maxdepth 1 \( -name 'llama-server' -o -name '*.so*' \) -exec cp -a {} /out/bin/ \;
+
+# ---------------------------------------------------------------------------
+# Runtime base image selection, per CONTRACTS.md
+# ---------------------------------------------------------------------------
+FROM nvidia/cuda:12.6.3-runtime-ubuntu24.04 AS runtime-base-1
+FROM ubuntu:24.04 AS runtime-base-0
+
+FROM runtime-base-${GPU} AS runtime
+
+ARG GPU
+ENV DEBIAN_FRONTEND=noninteractive
+
+# curl: used only by the container HEALTHCHECK below to probe /health.
+# libgomp1: OpenMP runtime needed by ggml's CPU backend (the default here).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl \
+        libgomp1 \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && (useradd --create-home --uid 1000 --shell /usr/sbin/nologin llamauser \
+        || useradd --create-home --shell /usr/sbin/nologin llamauser)
+
+WORKDIR /app
+COPY --from=builder /out/bin/ /app/
+COPY containers/embedder/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh /app/llama-server && \
+    mkdir -p /models && chown -R llamauser:llamauser /app /models
+
+ENV LD_LIBRARY_PATH=/app
+ENV PATH="/app:${PATH}"
+
+# Defaults per CONTRACTS.md - overridable at runtime via compose `environment:`.
+ENV EMBEDDER_MODEL_PATH=/models/nomic-embed-text-v1.5.Q8_0.gguf
+ENV EMBEDDER_PORT=8081
+# Baked-in GPU/CPU default for -ngl, read by entrypoint.sh; EMBEDDER_NGL (if
+# set at runtime) always takes precedence over this.
+ENV EMBEDDER_GPU_BUILD=${GPU}
+
+USER llamauser
+
+EXPOSE 8081
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+    CMD curl -fsS "http://localhost:${EMBEDDER_PORT}/health" || exit 1
+
+ENTRYPOINT ["/entrypoint.sh"]

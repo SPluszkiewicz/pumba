@@ -1,0 +1,126 @@
+# containers/tools/Containerfile
+#
+# The `tools` service: a FastAPI app exposing a curated, fixed set of
+# build/test/lint/search/read-file endpoints for the C++ project bind-mounted
+# read-only at /workspace/app (see compose.yaml: `${CODEBASE_PATH}:/workspace/app:ro`).
+#
+# This is the highest security-risk service in the system - an LLM decides
+# when to call it - so there is no generic shell/exec passthrough anywhere;
+# see services/tools/ for the allow-listed handlers.
+#
+# Base image + C++ toolchain versions are pinned per CONTRACTS.md and MUST
+# match `app`'s and `devtools`' toolchain exactly (same cmake/gcc/
+# clang-tidy/clang-format/cppcheck/ripgrep, all via ubuntu:24.04 apt
+# defaults - do not bump without updating CONTRACTS.md too). ubuntu:24.04
+# is the pin (rather than 22.04) specifically because it matches the target
+# deployment OS of the real C++ project this stack builds/tests against.
+#
+# Python version note: this container's toolchain versions are pinned to
+# Ubuntu 24.04 apt defaults, which is a *different* base image family from
+# the other Python services (`python:3.11-slim-bookworm`), so there is no
+# cross-service Python version to match here - only internal consistency
+# within this container matters. Ubuntu 24.04's default `python3` is
+# 3.12 (currently 3.12.3). We deliberately use that apt-default Python
+# rather than pulling in the deadsnakes PPA for 3.11: everything this
+# service needs (`pathlib.Path.is_relative_to`, structural pattern matching
+# is not used, etc.) only requires Python >= 3.9, and avoiding a third-party
+# PPA keeps the build simpler and more reproducible. If a future dependency
+# needs a specific 3.11-only feature, switch to deadsnakes here and update
+# this comment.
+
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# build-essential + cmake: C++ toolchain for /build and /test (gcc/g++ 13,
+#   cmake 3.28.3 default via apt, per CONTRACTS.md).
+# libcurl4-openssl-dev + nlohmann-json3-dev + catch2: the app's own
+#   find_package() deps (configure would fail without them).
+# clang-tidy / clang-format / clangd (clang-tools-18) + cppcheck: /lint,
+#   /format/check, /static-analysis, /lsp/*.
+# git + subversion: the read-only /git/* and /svn/* endpoints.
+# ripgrep: /search.
+# python3/python3-pip: this service's own runtime.
+# wget: used only by compose.yaml's container HEALTHCHECK to probe /health.
+# ca-certificates: pip install over HTTPS at build time only (build stage
+#   has network access; the running container does not, per tools-net).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        cmake \
+        libcurl4-openssl-dev \
+        nlohmann-json3-dev \
+        catch2 \
+        clang-tidy \
+        clang-format \
+        clangd \
+        cppcheck \
+        ripgrep \
+        git \
+        subversion \
+        python3 \
+        python3-pip \
+        wget \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# ubuntu:24.04 now ships a built-in `ubuntu` user at UID/GID 1000 (see
+# containers/devtools/Containerfile's comment for the same issue) - fall
+# back to an auto-assigned UID if 1000 is already taken rather than
+# hard-failing the build.
+RUN useradd --create-home --uid 1000 --shell /usr/sbin/nologin toolsuser \
+    || useradd --create-home --shell /usr/sbin/nologin toolsuser
+
+WORKDIR /app
+
+COPY services/tools/requirements.txt /app/services/tools/requirements.txt
+# Ubuntu 24.04 marks the system Python as PEP 668 externally-managed.
+# There is no venv here on purpose: this image IS the isolated runtime
+# (one process, pinned requirements). --break-system-packages is the
+# documented escape hatch for that situation.
+RUN python3 -m pip install --no-cache-dir --break-system-packages \
+        -r /app/services/tools/requirements.txt
+
+COPY services/tools/ /app/services/tools/
+# Shared argument models (`from services.common.tool_models import ...`).
+COPY services/common/ /app/services/common/
+
+# Repo-root `.clang-format`/`.clang-tidy` baked in at a fixed path: the
+# tools container only bind-mounts the project tree (`CODEBASE_PATH`,
+# default `./sample`) at /workspace/app, so this repo's config files are never visible
+# inside the container at runtime, and clang-format/clang-tidy's own
+# upward-directory-search would silently fall back to built-in defaults
+# without this. `handlers/lint.py` and `handlers/format_check.py` pass
+# these explicitly via `--config-file=`/`--style=file:` (gracefully skipped
+# if absent, e.g. in local dev). See docs/reference/tools-api.md.
+COPY .clang-format /etc/tools-config/.clang-format
+COPY .clang-tidy /etc/tools-config/.clang-tidy
+
+# /workspace/app is provided at runtime by compose.yaml's read-only bind
+# mount; /workspace/scratch is compose.yaml's writable tmpfs used for
+# per-request build/test scratch dirs (see handlers/build.py). Neither
+# needs to exist at image-build time, but creating them (owned by the
+# non-root user) avoids surprises if the container is ever run without
+# those mounts attached (e.g. `podman run` directly for debugging).
+RUN mkdir -p /workspace/app /workspace/scratch && \
+    chown -R toolsuser:toolsuser /app /workspace
+
+ENV PYTHONPATH=/app
+ENV TOOLS_HEALTH_STRICT=1
+ENV PYTHONUNBUFFERED=1
+ENV TOOLS_PORT=8091
+ENV TOOLS_PROJECT_ROOT=/workspace/app
+
+USER toolsuser
+
+EXPOSE 8091
+
+# Mirrors compose.yaml's own `healthcheck:` for this service (which takes
+# precedence when run via compose) - kept here too so `podman run` on this
+# image standalone still reports health correctly.
+HEALTHCHECK --interval=10s --timeout=5s --start-period=10s --retries=10 \
+    CMD wget -q -O /dev/null "http://localhost:${TOOLS_PORT}/health" || exit 1
+
+# Shell form (not exec form) so `${TOOLS_PORT}` expands at container start -
+# this is a trusted, fixed startup command with no caller-controlled input,
+# unlike the argv lists the service itself builds for subprocesses.
+ENTRYPOINT ["sh", "-c", "exec python3 -m uvicorn services.tools.main:app --host 0.0.0.0 --port ${TOOLS_PORT}"]

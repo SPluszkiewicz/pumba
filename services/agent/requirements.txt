@@ -1,0 +1,20 @@
+# Qdrant is queried via its plain HTTP REST API through httpx (see rag.py)
+# rather than the qdrant-client package, so the X-Request-Id correlation
+# header can be forwarded on every outbound call like the other services.
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+httpx==0.28.1
+pydantic==2.10.4
+# Official OpenAI SDK for the llm/embedder OpenAI-compatible endpoints
+# (llm_client.py). Pinned to the 2.x line: 3.x depends on `httpx2`, which
+# would put two HTTP stacks in this service.
+openai==2.54.0
+# Structured JSON logging (services/common/logging.py).
+structlog==26.1.0
+pathspec==0.12.1
+prometheus-client==0.21.1
+prometheus-fastapi-instrumentator==7.1.0
+# Repo-map signatures (repo_map.py). Same pins as the indexer. A missing
+# import falls back to a line scan so host tests still run.
+tree-sitter==0.23.2
+tree-sitter-cpp==0.23.4

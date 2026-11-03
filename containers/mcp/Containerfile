@@ -1,0 +1,36 @@
+# containers/mcp/Containerfile
+#
+# Thin MCP front for `agent` (Streamable HTTP /mcp + GET /health).
+# Base image and port are pinned per CONTRACTS.md.
+
+FROM python:3.11-slim-bookworm
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --create-home --uid 1000 --shell /usr/sbin/nologin mcpuser
+
+WORKDIR /app
+
+COPY services/mcp/requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
+
+COPY services/mcp/ /app/
+
+RUN chown -R mcpuser:mcpuser /app
+
+ENV MCP_PORT=8092 \
+    MCP_TRANSPORT=http
+
+USER mcpuser
+
+EXPOSE 8092
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -fsS "http://localhost:${MCP_PORT}/health" || exit 1
+
+CMD ["python", "main.py"]

@@ -1,0 +1,133 @@
+# This is the ONLY toolchain image in the repo - the host needs nothing but
+# Podman. If you need a new dev dependency anywhere in this project, add it
+# here.
+#
+# Serves three purposes (see ../../compose.yaml):
+#   - `devtools` service (profile `dev`): interactive shell for an editor's
+#     Dev Containers integration, or `podman compose run --rm devtools bash`.
+#   - `fetch-models` service (profile `setup`): one-off model download job;
+#     compose.yaml overrides the command (`python scripts/container/fetch_models.py`).
+#   - ad hoc `pytest`/`ctest`/lint runs against any component's test suite,
+#     entirely inside the container, no host installs required.
+#
+# Base is ubuntu:24.04 to match the C++ toolchain pin in CONTRACTS.md (same
+# family as the `app` image's builder stage and the `tools` service), so
+# building/testing the C++ app in here behaves identically to those images.
+# 24.04 (rather than 22.04) is the pin specifically because it matches the
+# target deployment OS of the real C++ project this stack builds/tests
+# against.
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# --- C++ toolchain + the app's own dependencies -----------------------------
+# Per CONTRACTS.md: Ubuntu 24.04's apt defaults are the pin - gcc/g++ 13,
+# cmake 3.28.3, clang-tools-18 (clang-tidy/clang-format), cppcheck, ripgrep.
+# libcurl4-openssl-dev + nlohmann-json3-dev + catch2 are the app's own
+# build deps, so the C++ app can be built/tested entirely inside this container.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        cmake \
+        clang-tidy \
+        clang-format \
+        cppcheck \
+        ripgrep \
+        git \
+        curl \
+        ca-certificates \
+        gnupg \
+        software-properties-common \
+        libcurl4-openssl-dev \
+        nlohmann-json3-dev \
+        catch2 \
+    && rm -rf /var/lib/apt/lists/*
+
+# --- Python ------------------------------------------------------------------
+# Ubuntu 24.04's default python3 is 3.12. CONTRACTS.md pins python:3.11-slim-
+# bookworm for every Python *service* image, so we pull python3.11 in here
+# (via the deadsnakes PPA, which supports noble/24.04 - there's no
+# first-party 3.11 package once 3.12 is the apt default) for parity when
+# running those services' test suites inside this container.
+#
+# We deliberately do NOT repoint the system /usr/bin/python3 (left as 3.12),
+# since apt's own tooling (add-apt-repository, unattended-upgrades, etc.)
+# depends on python3-apt being bound to that exact interpreter. Instead we
+# add a plain, unversioned `python` symlink -> python3.11, which is what
+# compose.yaml's `fetch-models` command invokes, and install every project
+# dependency explicitly against python3.11 below. `python3-pip` (apt) is also
+# installed as a system fallback for the 3.12 interpreter, but is not what
+# project dependencies are installed with.
+RUN add-apt-repository -y ppa:deadsnakes/ppa \
+    && apt-get update && apt-get install -y --no-install-recommends \
+        python3.11 \
+        python3.11-venv \
+        python3.11-dev \
+        python3.11-distutils \
+        python3-pip \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sf /usr/bin/python3.11 /usr/bin/python
+
+# pip for python3.11 specifically (ensurepip, then self-upgrade).
+# --ignore-installed is required here: Debian/Ubuntu's python3-pip apt
+# package (pulled in above as the python3.12 fallback) installs into
+# /usr/lib/python3/dist-packages, which is on *every* python3.x interpreter's
+# sys.path regardless of version - so `python3.11 -m pip` resolves to that
+# same apt-managed pip. Upgrading it in place fails ("Cannot uninstall pip
+# 24.0, RECORD file not found") because apt-installed packages have no pip
+# RECORD metadata to uninstall by; --ignore-installed tells pip to shadow it
+# with a fresh copy instead of trying to uninstall the apt one first.
+RUN python3.11 -m ensurepip --upgrade \
+    && python3.11 -m pip install --no-cache-dir --upgrade --ignore-installed pip setuptools wheel
+
+# Python packages needed to run `pytest` against every service's test suite
+# (tests/indexer, tests/agent, tests/tools, tests/scripts).
+#
+# Installed FROM each service's own pinned services/*/requirements.txt
+# rather than a separate hardcoded list here, so devtools can never drift
+# from the exact versions each service actually ships with (e.g. installing
+# an unpinned `tree-sitter-languages` here alongside indexer's pinned
+# `tree-sitter-cpp==0.23.4` would risk exactly the ABI-drift breakage
+# services/indexer/requirements.txt documents avoiding). If a service adds a
+# dependency, it goes in that service's requirements.txt and is
+# automatically picked up here too.
+#
+# pytest/pytest-asyncio are the only test-runner packages not already
+# covered by a service's own requirements.txt (services don't depend on
+# their own test runner at import time). Nothing in tests/ uses
+# pytest-mock's `mocker` fixture (tests use stdlib unittest.mock /
+# monkeypatch directly), so it is deliberately not installed here.
+COPY services/agent/requirements.txt /tmp/requirements-agent.txt
+COPY services/indexer/requirements.txt /tmp/requirements-indexer.txt
+COPY services/tools/requirements.txt /tmp/requirements-tools.txt
+COPY services/mcp/requirements.txt /tmp/requirements-mcp.txt
+RUN python3.11 -m pip install --no-cache-dir \
+        -r /tmp/requirements-agent.txt \
+        -r /tmp/requirements-indexer.txt \
+        -r /tmp/requirements-tools.txt \
+        -r /tmp/requirements-mcp.txt \
+        pytest==8.3.4 \
+        pytest-asyncio==0.25.2 \
+        huggingface_hub \
+    && rm -f /tmp/requirements-agent.txt /tmp/requirements-indexer.txt \
+        /tmp/requirements-tools.txt /tmp/requirements-mcp.txt
+
+# --- non-root user ------------------------------------------------------------
+# UID 1000 is the common default for a single-user Linux host, so bind mounts
+# (./ -> /workspace, ./models, ./scripts) are reasonably likely to come out
+# owned by a real host user rather than root. Falls back to an auto-assigned
+# uid/gid rather than hard-failing the build if 1000 is already taken in some
+# derived/future base image.
+RUN (groupadd --gid 1000 dev || groupadd dev) \
+    && (useradd --uid 1000 --gid dev --create-home --shell /bin/bash dev \
+        || useradd --gid dev --create-home --shell /bin/bash dev) \
+    && mkdir -p /workspace \
+    && chown -R dev:dev /workspace
+
+WORKDIR /workspace
+USER dev
+
+# No task-specific ENTRYPOINT/CMD: this image is used interactively (bash),
+# for the fetch-models one-off command (overridden via compose.yaml's own
+# `command:`), and for ad hoc pytest/ctest runs. Compose/devcontainer decide
+# what actually runs.
+CMD ["/bin/bash"]

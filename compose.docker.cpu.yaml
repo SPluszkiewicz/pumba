@@ -1,0 +1,27 @@
+# Docker CPU overlay. `devices: []` in compose.cpu.yaml does not replace the
+# CDI list (Compose appends sequences). This file is stacked only when
+# scripts/deploy.py is using Docker and has fallen back to CPU.
+# Same masquerade lock as compose.docker.yaml. This file replaces that
+# overlay on the CPU path, so the option has to be repeated here.
+
+networks:
+  publish-net:
+    driver_opts:
+      com.docker.network.bridge.enable_ip_masquerade: "false"
+
+services:
+  llm:
+    devices: !override []
+    gpus: !reset null
+
+  embedder:
+    devices: !override []
+    gpus: !reset null
+
+  reranker:
+    devices: !override []
+    gpus: !reset null
+
+  trainer:
+    devices: !override []
+    gpus: !reset null
