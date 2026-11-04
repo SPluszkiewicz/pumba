@@ -5,17 +5,17 @@
 `python scripts/deploy.py up` checks NVIDIA CDI **before** starting the stack:
 
 1. If `.env` has `LLM_GPU_ARG=0` and `EMBEDDER_GPU_ARG=0`, it uses the CPU overlay
-   (`compose.cpu.yaml`) and skips GPU devices.
+   (`config/compose/cpu.yaml`) and skips GPU devices.
 2. Otherwise it probes `nvidia.com/gpu=all` (via `nvidia-ctk cdi list` or a short
    `podman run --device ...`).
 3. If CDI is missing, it tries `sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml`.
 4. If that still fails, it falls back to CPU automatically (updates `.env` GPU vars
-   and adds `-f compose.cpu.yaml` so Podman does not request CDI devices).
+   and adds `-f config/compose/cpu.yaml` so Podman does not request CDI devices).
 
 When `CONTAINER_RUNTIME` resolves to `docker`, the CDI probe is skipped.
-`deploy.py` stacks `compose.docker.yaml` (`gpus: all`, CDI devices replaced)
+`deploy.py` stacks `config/compose/docker.yaml` (`gpus: all`, CDI devices replaced)
 and probes with `docker run --gpus all`. The CPU fallback stacks
-`compose.cpu.yaml` and `compose.docker.cpu.yaml`, so Docker is not asked for
+`config/compose/cpu.yaml` and `config/compose/docker.cpu.yaml`, so Docker is not asked for
 a GPU.
 
 On **Fedora** (native Podman, not WSL), install the toolkit once:
@@ -147,7 +147,7 @@ Task Manager can show about 56 Go by adding the card's memory to shared system R
 
 Read `nvidia-smi` and use the `memory.total` line:
 
-`16g`, `24g`, and `48g` keep `Qwen2.5-Coder-14B-Instruct-Q5_K_M`. The other three cases swap the chat model so the same question can be compared. Context stays 32768. `deploy.py up` does not download the larger files.
+`16g`, `24g`, and `48g` keep `Qwen2.5-Coder-14B-Instruct-Q5_K_M`. The other three NVIDIA cases swap the chat model so the same question can be compared. Those six stay at context 32768. `deploy.py up` does not download the larger files. `evo-x5` is a different machine: context 262144, and `up` serves the model on the host.
 
 | Case | Card (`memory.total`) | What changes | Command |
 | --- | --- | --- | --- |
@@ -157,6 +157,7 @@ Read `nvidia-smi` and use the `memory.total` line:
 | `48g` | ~46068 MiB with ECC, or 49152 | 14B, `f16` KV. Compare with `24g` for the cache type. | `python scripts/deploy.py gpu-profile 48g` |
 | `48g-30b` | same 48 Go card | same 30B-A3B at Q8. Compare with `48g` and with `24g-30b`. | `fetch-extra 48g-30b`, then `gpu-profile 48g-30b` |
 | `48g-32b` | same 48 Go card | Qwen2.5-Coder-32B Q5, `f16` KV. Compare with `48g-30b`. | `fetch-extra 48g-32b`, then `gpu-profile 48g-32b` |
+| `evo-x5` | GMKtec EVO-X5 Pro, 192 Go unified | Mistral Small 4 Q5, host `llama-server`, context 262144 | `gpu-profile evo-x5`, then `up` (fetches the GGUF if missing) |
 
 The questions that separate these profiles are in [Scénarios RTX 6000](rtx6000-scenarios.md). Run them on that machine. Until `nvidia-smi` is known, stay on `16g`. A profile rewrites those keys in `.env` and leaves the bearer token alone. If `EMBEDDER_GPU_ARG` changes, rebuild the embedder, then recreate `llm`, `embedder`, and `reranker`. The Qwen3-Coder profiles need one tool-call request after the first load: the chat template is not the Qwen2.5 one. If `llm` never becomes healthy on `24g-30b`, that Q5 does not fit the 24 Go card; switch back to `24g`.
 
@@ -182,14 +183,14 @@ LLM_NGL=0
 EMBEDDER_NGL=0
 ```
 
-Then run `python scripts/deploy.py up` — it applies `compose.cpu.yaml` without
+Then run `python scripts/deploy.py up` — it applies `config/compose/cpu.yaml` without
 needing to edit `compose.yaml` manually.
 
 Manual equivalent:
 
 ```bash
-podman compose -f compose.yaml -f compose.cpu.yaml build llm embedder
-podman compose -f compose.yaml -f compose.cpu.yaml up -d llm embedder
+podman compose -f compose.yaml -f config/compose/cpu.yaml build llm embedder
+podman compose -f compose.yaml -f config/compose/cpu.yaml up -d llm embedder
 ```
 
 ### Tuning CPU threads (and NUMA on multi-socket hosts)

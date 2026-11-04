@@ -24,11 +24,18 @@ import httpx
 import llm_client
 from cited_files import is_noise_path, paths_in_query
 from common.logging import get_logger
+from common.qdrant_schema import (
+    DEFAULT_COLLECTION,
+    DEFAULT_URL,
+    DENSE_VECTOR_NAME,
+    QUERY_PREFIX,
+    SPARSE_VECTOR_NAME,
+)
 from common.sparse_text import encode_sparse
-from scope import current_collection
+from scope import current_checkout_id, current_collection
 
-QDRANT_URL = os.getenv("QDRANT_URL", "http://qdrant:6333")
-QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "code_chunks")
+QDRANT_URL = os.getenv("QDRANT_URL", DEFAULT_URL)
+QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", DEFAULT_COLLECTION)
 
 # Number of similar chunks returned to the prompt. Each leg of the hybrid
 # query (dense and BM25) prefetches PREFETCH_K candidates; Qdrant fuses them
@@ -39,14 +46,6 @@ TOP_K = 5
 PREFETCH_K = 20
 RERANK_CANDIDATES = 20
 RERANK_DOC_CHARS = 4000
-DENSE_VECTOR_NAME = "dense"
-SPARSE_VECTOR_NAME = "bm25"
-
-# nomic-embed-text-v1.5 requires this exact prefix for queries (the indexer
-# uses "search_document: " for chunks - see CONTRACTS.md). Getting this
-# wrong silently degrades retrieval quality without erroring, so don't touch
-# it casually.
-QUERY_PREFIX = "search_query: "
 
 
 @dataclass
@@ -95,18 +94,34 @@ async def embed_query(http_client: httpx.AsyncClient, query: str, request_id: st
         return None
 
 
-def hybrid_query_body(embedding: list[float], query_text: str, top_k: int) -> dict[str, Any]:
+def _checkout_filter(checkout_id: str | None = None) -> dict[str, Any] | None:
+    chosen = (checkout_id if checkout_id is not None else current_checkout_id()).strip()
+    if not chosen:
+        return None
+    return {"must": [{"key": "checkouts", "match": {"value": chosen}}]}
+
+
+def hybrid_query_body(
+    embedding: list[float],
+    query_text: str,
+    top_k: int,
+    *,
+    checkout_id: str | None = None,
+) -> dict[str, Any]:
     """Prefetch dense + BM25, fuse with RRF. See CONTRACTS.md."""
     indices, values = encode_sparse(query_text)
+    dense_leg: dict[str, Any] = {"query": embedding, "using": DENSE_VECTOR_NAME, "limit": PREFETCH_K}
+    sparse_leg: dict[str, Any] = {
+        "query": {"indices": indices, "values": values},
+        "using": SPARSE_VECTOR_NAME,
+        "limit": PREFETCH_K,
+    }
+    qfilter = _checkout_filter(checkout_id)
+    if qfilter is not None:
+        dense_leg["filter"] = qfilter
+        sparse_leg["filter"] = qfilter
     return {
-        "prefetch": [
-            {"query": embedding, "using": DENSE_VECTOR_NAME, "limit": PREFETCH_K},
-            {
-                "query": {"indices": indices, "values": values},
-                "using": SPARSE_VECTOR_NAME,
-                "limit": PREFETCH_K,
-            },
-        ],
+        "prefetch": [dense_leg, sparse_leg],
         "query": {"fusion": "rrf"},
         "limit": top_k,
         "with_payload": True,
@@ -186,14 +201,18 @@ async def _search_dense_only(
     top_k: int,
 ) -> list[RetrievedChunk]:
     url = f"{QDRANT_URL}/collections/{current_collection()}/points/search"
+    payload: dict[str, Any] = {
+        "vector": {"name": DENSE_VECTOR_NAME, "vector": embedding},
+        "limit": top_k,
+        "with_payload": True,
+    }
+    qfilter = _checkout_filter()
+    if qfilter is not None:
+        payload["filter"] = qfilter
     try:
         resp = await http_client.post(
             url,
-            json={
-                "vector": {"name": DENSE_VECTOR_NAME, "vector": embedding},
-                "limit": top_k,
-                "with_payload": True,
-            },
+            json=payload,
             headers={"X-Request-Id": request_id},
         )
         if resp.status_code == 404:
@@ -307,7 +326,7 @@ def retrieval_trace(result: RagResult) -> dict[str, Any]:
 
 def clip_excerpt(text: str, limit: int = 400) -> str:
     """Short quote for a lookup hit. The chat model is not involved."""
-    cleaned = text.strip()
+    cleaned = text.replace("\r\n", "\n").strip()
     if len(cleaned) <= limit:
         return cleaned
     return cleaned[:limit].rstrip() + "…"

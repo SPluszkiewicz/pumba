@@ -1,80 +1,122 @@
-# Using VS Code
+# VS Code et Continue.dev
 
-What the two doors are for, in plain language:
-[Comprendre sans bagage](../concepts/en-clair.md).
+Ce que fait chaque pièce, sans jargon :
+[Comprendre sans bagage](../concepts/en-clair.md). Le démarrage sur
+l'EVO-X5 est dans [Déployer sur l'EVO-X5](evo-x5.md).
 
-Two doors, one stack. Copilot writes when it calls MCP. The local GGUF writes
-when a Continue-style client talks to `llama-server`. Do not chain them so
-that each rewrites the other's answer.
+## Avant d'ouvrir l'éditeur
 
-Register the checkout first (`python scripts/deploy.py workspace <path>`).
-That writes `X-Workspace` into `.vscode/mcp.json` and indexes the remote once.
+La pile tourne (`python scripts/deploy.py up`), puis la copie de travail
+est enregistrée :
 
-## Door A — Copilot reads facts
-
-`http://127.0.0.1:8092/mcp` after `python scripts/deploy.py up`.
-
-| Tool | What you get |
-| --- | --- |
-| `lookup` | Index excerpt: path, lines, symbol. Dirty files from `svn`/`git status` come first, marked `[working copy]`. No chat model. |
-| `check` | `build`, `test`, or `compile` log. No opinion. |
-| `outline` | Symbols in one file (`name kind line`). |
-| `calls` | Callers and callees (`name path:line`). |
-| `types` | Base and derived types (`name path:line`). |
-| `ask` | Short cited judgment (400 tokens). No build, no symbol list. Paste it unchanged. |
-
-File text, text search, and git history come from the
-[Filesystem](https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem)
-and [Git](https://github.com/modelcontextprotocol/servers/tree/main/src/git)
-MCP servers. Subversion status comes from a read-only
-[svn-mcp](https://github.com/WillBrock/svn-mcp/). This stack does not
-reimplement those.
-
-Jira and Confluence are a second MCP server,
-[mcp-atlassian](https://github.com/sooperset/mcp-atlassian), started with
-`uvx` on the machine that can reach the server. It is not inside compose
-and it does not index tickets. Copy `atlassian.env.example` to
-`atlassian.env`, fill `JIRA_URL`, `JIRA_PERSONAL_TOKEN`, and the two
-Confluence lines if you use it. The editor entries are `.vscode/mcp.json`
-and `.cursor/mcp.json` (`atlassian`). Leave a Confluence line empty to
-skip that product. `READ_ONLY_MODE=true` keeps the four read tools
-(`jira_search`, `jira_get_issue`, `confluence_search`, `confluence_get_page`).
-
-Example prompt: ask Copilot to call `lookup` with the question unchanged,
-then paste the tool text.
-
-## Door B — the local model writes
-
-`llama-server` is published on loopback only:
-
-```
-http://127.0.0.1:8080/v1
+```text
+python scripts/deploy.py workspace D:/svn/ticket-142
 ```
 
-The model id is the GGUF file name without `.gguf`. With the default
-`.env` that is `Qwen2.5-Coder-14B-Instruct-Q5_K_M`. The 0.5B file is only
-for a connectivity check.
+Cette commande écrit `.vscode/mcp.json` dans cette copie, pose l'en-tête
+`X-Workspace`, et indexe le dépôt distant une fois.
 
-Continue (`~/.continue/config.json`), OpenAI-compatible provider:
+Si l'éditeur est sur une autre machine que celle qui sert le modèle,
+ouvre un tunnel SSH depuis le poste où tourne VS Code :
+
+```text
+ssh -L 8090:127.0.0.1:8090 -L 8092:127.0.0.1:8092 -L 8080:127.0.0.1:8080 utilisateur@machine-serveur
+```
+
+Toutes les adresses ci-dessous restent alors `127.0.0.1`.
+
+## 1. Continue.dev : le modèle local et le MCP
+
+Continue lit `~/.continue/config.yaml` (sous Windows :
+`%USERPROFILE%\.continue\config.yaml`), ou `.continue/assistants/` dans
+le dossier ouvert. Le format actuel est YAML.
+
+Sur l'EVO-X5, l'identifiant du modèle est `mistral-small-4`. Sur un
+profil NVIDIA 14B, c'est `Qwen2.5-Coder-14B-Instruct-Q5_K_M`.
+
+```yaml
+name: pumba
+version: 1.0.0
+schema: v1
+
+models:
+  - name: Mistral Small 4
+    provider: openai
+    model: mistral-small-4
+    apiBase: http://127.0.0.1:8080/v1
+    apiKey: local
+    roles:
+      - chat
+      - edit
+      - apply
+    capabilities:
+      - tool_use
+
+mcpServers:
+  - name: pumba
+    type: streamable-http
+    url: http://127.0.0.1:8092/mcp
+    requestOptions:
+      headers:
+        X-Workspace: D:/svn/ticket-142
+```
+
+`apiKey` doit seulement être non vide. `X-Workspace` est le chemin de la
+copie sur la machine où tourne la pile. Les outils MCP ne sont appelés
+qu'en mode **Agent** de Continue. C'est Continue qui modifie les
+fichiers dans l'éditeur ; le MCP ne lui renvoie que des faits.
+
+Si une ancienne installation a encore `~/.continue/config.json`, garde
+un seul des deux fichiers : `config.yaml` prend le dessus.
+
+## 2. VS Code (Copilot) : le MCP seul
+
+`.vscode/mcp.json` est déjà écrit par `deploy.py workspace` :
 
 ```json
 {
-  "models": [
-    {
-      "title": "Local 14B",
-      "provider": "openai",
-      "model": "Qwen2.5-Coder-14B-Instruct-Q5_K_M",
-      "apiBase": "http://127.0.0.1:8080/v1",
-      "apiKey": "local"
+  "servers": {
+    "pumba": {
+      "type": "http",
+      "url": "http://127.0.0.1:8092/mcp",
+      "headers": {
+        "X-Workspace": "D:/svn/ticket-142"
+      }
     }
-  ]
+  }
 }
 ```
 
-Any non-empty `apiKey` is enough. Embedder and Qdrant stay inside the
-compose network. Do not publish them, and do not change the bind from
-`127.0.0.1` to `0.0.0.0`.
+Copilot rédige et applique ses diffs. Il appelle `pumba` pour lire
+l'index et les outils C++ :
 
-Questions about the shape of the repository (architecture, overview,
-how the tree is organized) also receive a ranked signature map in the
-agent prompt. Fuzzy search stays in Qdrant.
+| Outil | Ce qu'il renvoie |
+| --- | --- |
+| `lookup` | Extrait de l'index : chemin, lignes, symbole. Les fichiers modifiés (`svn`/`git status`) passent en tête, marqués `[working copy]`. |
+| `check` | Journal `build`, `test` ou `compile`. |
+| `outline` | Symboles d'un fichier (`nom kind ligne`). |
+| `calls` | Appelants et appelés (`nom chemin:ligne`). |
+| `types` | Types de base et dérivés (`nom chemin:ligne`). |
+| `ask` | Jugement court et cité (400 tokens). À coller tel quel. |
+
+La lecture de fichiers, la recherche plein texte et l'historique Git ou
+Subversion viennent des serveurs MCP
+[Filesystem](https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem),
+[Git](https://github.com/modelcontextprotocol/servers/tree/main/src/git)
+et [svn-mcp](https://github.com/WillBrock/svn-mcp/). Jira et Confluence
+passent par [mcp-atlassian](https://github.com/sooperset/mcp-atlassian)
+via `atlassian.env` (copie de `atlassian.env.example`).
+
+## 3. Qui modifie les fichiers
+
+Une seule écriture par changement :
+
+- Dans VS Code (Continue ou Copilot), l'éditeur applique le diff. Le MCP
+  `pumba` n'expose ni `edit` ni `apply`.
+- Sur la page `http://127.0.0.1:8090/ui`, l'agent passe par `patch`
+  (`edit` puis `apply`), sur la machine où tourne la pile, sans commit.
+
+L'embedder et Qdrant restent dans le réseau compose et ne sont pas
+publiés. Le conteneur `llm` NVIDIA reste sur `127.0.0.1`. Sur `evo-x5`,
+le processus hôte écoute `0.0.0.0` pour que le conteneur `agent`
+l'appelle ; l'éditeur utilise toujours `127.0.0.1`.

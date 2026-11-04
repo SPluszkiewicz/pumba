@@ -103,7 +103,7 @@ class TestRejectsAbsolutePaths:
             "//etc/passwd",
             "C:/Windows/System32/drivers/etc/hosts",
             "C:\\Windows\\System32",
-            "D:/rest/local_llm/CONTRACTS.md",
+            "D:/rest/pumba/CONTRACTS.md",
         ],
     )
     def test_rejects_absolute_path(self, raw: str, project_root: Path) -> None:

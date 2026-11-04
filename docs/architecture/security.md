@@ -54,9 +54,11 @@ limits who can reach it. `mcp` lives on the same network, holds that token,
 and is the only other host-facing surface: Streamable HTTP on
 `127.0.0.1:8092` (never `0.0.0.0`). Its tools are `lookup`, `check`,
 `outline`, `calls`, `types`, and a short `ask`. `ask` forwards to `/chat`
-with no tool schema. `mcp` does not join `tools-net`. `llm` is also on
+with no tool schema. `mcp` does not join `tools-net`. The NVIDIA `llm` container is also on
 loopback (`127.0.0.1:8080`) so an editor can call the local model
-directly. Embedder and Qdrant stay unpublished.
+directly. On `evo-x5` the host `llama-server` listens on `0.0.0.0:8080`
+so the agent container can reach it; the page and MCP stay on loopback.
+Embedder and Qdrant stay unpublished.
 
 ## Layer 6: reproducibility
 

@@ -9,8 +9,10 @@ that scratch directory.
 
 from __future__ import annotations
 
+import json
 import shutil
 import threading
+import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -169,6 +171,11 @@ def _hierarchy(
     position = {"line": line - 1, "character": character - 1}
     try:
         items = session.request(prepare, {"textDocument": {"uri": uri}, "position": position})
+        if (not isinstance(items, list) or not items) and line > 1:
+            items = session.request(
+                prepare,
+                {"textDocument": {"uri": uri}, "position": {"line": line - 2, "character": character - 1}},
+            )
     except ClangdError as exc:
         return _fail(str(exc))
     if not isinstance(items, list) or not items or not isinstance(items[0], dict):
@@ -182,12 +189,25 @@ def _hierarchy(
     try:
         if want_in:
             found = session.request(incoming, {"item": item})
+            if not found and incoming == "callHierarchy/incomingCalls":
+                for _ in range(4):
+                    time.sleep(0.5)
+                    found = session.request(incoming, {"item": item})
+                    if found:
+                        break
             text, cut = format_related_symbols(found, prefix, role=in_role)
             if text:
                 parts.append(text)
             truncated = truncated or cut
         if want_out:
-            found = session.request(outgoing, {"item": item})
+            try:
+                found = session.request(outgoing, {"item": item})
+            except ClangdError as exc:
+                # clangd implements incomingCalls; outgoingCalls returns -32601 (method not found).
+                if "-32601" in str(exc) or "method not found" in str(exc).lower():
+                    found = []
+                else:
+                    raise
             text, cut = format_related_symbols(found, prefix, role=out_role)
             if text:
                 parts.append(text)
@@ -237,17 +257,45 @@ def _open(path: str, line: int, character: int, preset: str, project_root: Path,
     if isinstance(session, dict):
         return session
     uri = resolved.as_uri()
-    session.notify(
-        "textDocument/didOpen",
-        {
-            "textDocument": {
-                "uri": uri,
-                "languageId": "cpp",
-                "version": 1,
-                "text": data.decode("utf-8", "replace"),
-            }
-        },
-    )
+    text = data.decode("utf-8", "replace")
+    digest = hash(text)
+    opened_docs = getattr(session, "opened_docs", None)
+    if isinstance(opened_docs, dict):
+        if opened_docs.get(uri) != digest:
+            method = "textDocument/didChange" if uri in opened_docs else "textDocument/didOpen"
+            if method == "textDocument/didOpen":
+                session.notify(
+                    method,
+                    {
+                        "textDocument": {
+                            "uri": uri,
+                            "languageId": "cpp",
+                            "version": 1,
+                            "text": text,
+                        }
+                    },
+                )
+            else:
+                session.notify(
+                    method,
+                    {
+                        "textDocument": {"uri": uri, "version": 2},
+                        "contentChanges": [{"text": text}],
+                    },
+                )
+            opened_docs[uri] = digest
+    else:
+        session.notify(
+            "textDocument/didOpen",
+            {
+                "textDocument": {
+                    "uri": uri,
+                    "languageId": "cpp",
+                    "version": 1,
+                    "text": text,
+                }
+            },
+        )
     return session, uri
 
 
@@ -289,7 +337,7 @@ def _session(preset: str, project_root: Path, timeout: int) -> ClangdSession | d
                 previous.close()
                 del _sessions[old]
         session = ClangdSession.spawn(
-            ["clangd", f"--compile-commands-dir={commands_dir}", "--background-index=0", "--header-insertion=never"],
+            ["clangd", f"--compile-commands-dir={commands_dir}", "--background-index", "--header-insertion=never"],
             cwd=str(project_root),
         )
         try:
@@ -303,11 +351,52 @@ def _session(preset: str, project_root: Path, timeout: int) -> ClangdSession | d
                 },
             )
             session.notify("initialized", {})
+            _prime_compile_units(session, commands_dir / "compile_commands.json", project_root)
         except ClangdError as exc:
             session.close()
             return _fail(str(exc))
         _sessions[key] = session
         return session
+
+
+def _prime_compile_units(session: ClangdSession, compdb_path: Path, project_root: Path) -> None:
+    """Open up to 16 translation units from compile_commands.json so cross-TU incomingCalls work immediately."""
+    opened_docs = getattr(session, "opened_docs", None)
+    if not isinstance(opened_docs, dict) or not compdb_path.is_file():
+        return
+    try:
+        entries = json.loads(compdb_path.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, ValueError):
+        return
+    if not isinstance(entries, list) or len(entries) > 16:
+        return
+    primed = 0
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        raw_file = entry.get("file")
+        if not isinstance(raw_file, str):
+            continue
+        candidate = Path(raw_file)
+        if not candidate.is_file():
+            continue
+        try:
+            candidate.resolve().relative_to(project_root.resolve())
+            data = candidate.read_bytes()
+        except (OSError, ValueError):
+            continue
+        if len(data) > _MAX_FILE_BYTES:
+            continue
+        uri = candidate.resolve().as_uri()
+        text = data.decode("utf-8", "replace")
+        session.notify(
+            "textDocument/didOpen",
+            {"textDocument": {"uri": uri, "languageId": "cpp", "version": 1, "text": text}},
+        )
+        opened_docs[uri] = hash(text)
+        primed += 1
+    if primed:
+        time.sleep(0.5)
 
 
 def _uri_prefix(project_root: Path) -> str:

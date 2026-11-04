@@ -19,9 +19,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+from repo import ROOT as REPO_ROOT
+import product
+
 REGISTRY_PATH = REPO_ROOT / "state" / "workspaces.json"
-COMPOSE_MOUNTS = REPO_ROOT / "compose.workspaces.yaml"
+COMPOSE_MOUNTS = REPO_ROOT / "state" / "compose.workspaces.yaml"
 INDEX_LOCK = REPO_ROOT / "state" / "index.lock"
 _LOCK_STALE_SECONDS = 6 * 60 * 60
 
@@ -180,6 +182,8 @@ def detect_remote(path: Path) -> tuple[str, str]:
         url = _capture(["git", "-C", str(path), "remote", "get-url", "origin"], path)
         if url:
             return "git", normalize_remote(url)
+        key = normalize_host_path(path.resolve().as_posix())
+        return "git", f"path:{key}"
     key = normalize_host_path(path.resolve().as_posix())
     return "none", f"path:{key}"
 
@@ -319,7 +323,10 @@ def write_compose_mounts(data: dict, *, host_path_for, dest: Path | None = None)
     return True
 
 
-# Separate from the local-llm server. Reads atlassian.env; does not index tickets.
+MCP_SERVER_NAME = product.MCP_SERVER
+_LEGACY_MCP_SERVER_NAMES = product.MCP_LEGACY
+
+# Separate from this stack's MCP server. Reads atlassian.env; does not index tickets.
 ATLASSIAN_MCP_SERVER = {
     "type": "stdio",
     "command": "uvx",
@@ -346,15 +353,24 @@ def install_vscode_mcp(workspace: Path, host_path: str) -> None:
         if not isinstance(servers, dict):
             print(f"[deploy] {dest} has no servers map, left unchanged", flush=True)
             return
-        entry = servers.get("local-llm")
-        if not isinstance(entry, dict):
-            print(f"[deploy] {dest} has no local-llm server, left unchanged", flush=True)
+        found_name = None
+        entry = None
+        for name in (MCP_SERVER_NAME, *_LEGACY_MCP_SERVER_NAMES):
+            candidate = servers.get(name)
+            if isinstance(candidate, dict):
+                found_name, entry = name, candidate
+                break
+        if entry is None or found_name is None:
+            print(f"[deploy] {dest} has no {MCP_SERVER_NAME} server, left unchanged", flush=True)
             return
+        changed = False
+        if found_name != MCP_SERVER_NAME:
+            servers[MCP_SERVER_NAME] = servers.pop(found_name)
+            changed = True
         headers = entry.get("headers")
         if not isinstance(headers, dict):
             headers = {}
             entry["headers"] = headers
-        changed = False
         if headers.get("X-Workspace") != host_path:
             headers["X-Workspace"] = host_path
             changed = True
@@ -369,7 +385,7 @@ def install_vscode_mcp(workspace: Path, host_path: str) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     body = {
         "servers": {
-            "local-llm": {
+            MCP_SERVER_NAME: {
                 "type": "http",
                 "url": "http://127.0.0.1:8092/mcp",
                 "headers": {"X-Workspace": host_path},

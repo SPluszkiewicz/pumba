@@ -3,12 +3,9 @@
 from __future__ import annotations
 
 import importlib.util
-import sys
 from pathlib import Path
 
 _INDEXER = Path(__file__).resolve().parents[2] / "services" / "indexer"
-sys.path.insert(0, str(_INDEXER))
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "services"))
 
 import chunker
 import embeddings_client
@@ -33,6 +30,16 @@ class _Store:
         self.hashes = dict(hashes or {})
         self.deleted: list[list[str]] = []
         self.upserted: list[str] = []
+        self.attached: list[tuple[str, str]] = []
+        self.shared_blobs: set[tuple[str, str]] = set()
+
+    def snapshot(self):
+        from vector_store import IndexSnapshot
+
+        blob_points = {blob: [] for blob in self.shared_blobs}
+        for path, blob in self.hashes.items():
+            blob_points.setdefault((path, blob), [])
+        return IndexSnapshot(dict(self.hashes), blob_points)
 
     def listed_file_hashes(self) -> dict[str, str]:
         return dict(self.hashes)
@@ -42,6 +49,10 @@ class _Store:
         for path in paths:
             self.hashes.pop(path, None)
         return len(paths)
+
+    def attach_checkouts(self, pairs, snapshot=None) -> int:
+        self.attached.extend(list(pairs))
+        return len(pairs)
 
     def upsert_chunks(self, chunks, vectors) -> int:
         if chunks:
@@ -93,3 +104,66 @@ def test_new_file_is_indexed_without_a_prior_delete(tree: Path, monkeypatch: pyt
 
     assert "src/keep.cpp" in store.upserted
     assert store.deleted == [] or all("src/keep.cpp" not in batch for batch in store.deleted)
+
+
+def test_second_branch_links_shared_blob_without_embedding(
+    tree: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    keep = tree / "src" / "keep.cpp"
+    blob = chunker.compute_blob_hash(keep.read_bytes(), tree)
+
+    store = _Store()
+    store.shared_blobs = {("src/keep.cpp", blob)}
+    monkeypatch.setattr(
+        embeddings_client,
+        "embed_texts",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("shared blob must not be re-embedded")),
+    )
+    stats = indexer_main.index_source_root(tree, store)
+
+    assert stats["files_skipped"] == 1
+    assert store.attached == [("src/keep.cpp", blob)]
+
+
+def test_shared_tree_attaches_in_one_call_without_embedding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A second checkout must not rescan or re-embed once per file."""
+    src = tmp_path / "src"
+    src.mkdir()
+    blobs: dict[str, str] = {}
+    for i in range(12):
+        path = src / f"f{i}.cpp"
+        path.write_text(f"int f{i}() {{ return {i}; }}\n", encoding="utf-8")
+        blobs[f"src/f{i}.cpp"] = chunker.compute_blob_hash(path.read_bytes(), tmp_path)
+
+    store = _Store()
+    store.shared_blobs = set(blobs.items())
+    monkeypatch.setattr(
+        embeddings_client,
+        "embed_texts",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("shared blob must not be re-embedded")),
+    )
+    calls = {"snapshot": 0, "attach": 0}
+    inner_snapshot = store.snapshot
+    inner_attach = store.attach_checkouts
+
+    def snapshot():
+        calls["snapshot"] += 1
+        return inner_snapshot()
+
+    def attach_checkouts(pairs, snapshot=None):
+        calls["attach"] += 1
+        return inner_attach(pairs, snapshot)
+
+    store.snapshot = snapshot  # type: ignore[method-assign]
+    store.attach_checkouts = attach_checkouts  # type: ignore[method-assign]
+
+    stats = indexer_main.index_source_root(tmp_path, store)
+
+    assert stats["files_skipped"] == 12
+    assert calls["snapshot"] == 1
+    assert calls["attach"] == 1
+    assert len(store.attached) == 12
+    assert set(store.attached) == set(blobs.items())
+    assert store.upserted == []

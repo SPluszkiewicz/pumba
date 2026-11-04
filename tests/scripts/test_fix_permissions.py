@@ -9,7 +9,7 @@ import fix_permissions
 
 def test_to_linux_path_maps_windows_drives():
     assert fix_permissions.to_linux_path(Path("D:/svn/mon_projet")) == "/mnt/d/svn/mon_projet"
-    assert fix_permissions.to_linux_path(Path(r"C:\rest\local_llm\models")) == "/mnt/c/rest/local_llm/models"
+    assert fix_permissions.to_linux_path(Path(r"C:\rest\pumba\models")) == "/mnt/c/rest/pumba/models"
 
 
 def test_to_linux_path_leaves_posix_paths():
@@ -53,17 +53,17 @@ def test_private_files_are_env_files_only(tmp_path):
 
 def test_command_plan_on_windows_uses_the_podman_machine():
     plan = fix_permissions.command_plan(
-        Path(r"D:\rest\local_llm\models"), "a+rwX", recursive=True, platform="nt"
+        Path(r"D:\rest\pumba\models"), "a+rwX", recursive=True, platform="nt"
     )
     assert plan[0][:4] == ["podman", "machine", "ssh", "--"]
     assert "unshare" in plan[0]
-    assert plan[0][-2:] == ["a+rwX", "/mnt/d/rest/local_llm/models"]
+    assert plan[0][-2:] == ["a+rwX", "/mnt/d/rest/pumba/models"]
     assert plan[2][0] == "wsl"
 
 
 def test_command_plan_on_drvfs_skips_podman_unshare():
-    plan = fix_permissions.command_plan(Path("/mnt/d/rest/local_llm/models"), "a+rwX", recursive=True, platform="posix")
-    assert plan == [["chmod", "-R", "a+rwX", "/mnt/d/rest/local_llm/models"]]
+    plan = fix_permissions.command_plan(Path("/mnt/d/rest/pumba/models"), "a+rwX", recursive=True, platform="posix")
+    assert plan == [["chmod", "-R", "a+rwX", "/mnt/d/rest/pumba/models"]]
 
 
 def test_run_plan_drvfs_eperm_warns_and_continues(monkeypatch, capsys):
@@ -76,7 +76,7 @@ def test_run_plan_drvfs_eperm_warns_and_continues(monkeypatch, capsys):
         })()
 
     monkeypatch.setattr(fix_permissions.subprocess, "run", fake_run)
-    fix_permissions.run_plan([["chmod", "-R", "a+rwX", "/mnt/d/rest/local_llm/models"]], dry_run=False)
+    fix_permissions.run_plan([["chmod", "-R", "a+rwX", "/mnt/d/rest/pumba/models"]], dry_run=False)
     assert "Windows drive mount rejects chmod" in capsys.readouterr().out
 
 

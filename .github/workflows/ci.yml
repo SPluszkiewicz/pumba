@@ -1,4 +1,4 @@
-# CI for the local_llm stack.
+# CI for the Pumba stack.
 #
 # Two tiers, mirroring docs/guides/testing.md:
 #   unit   - lint + type-check + every pytest suite + the C++ ctest suite.

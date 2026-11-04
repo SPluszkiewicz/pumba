@@ -10,8 +10,8 @@ weights and adapters. `.env` is put back to mode 0600 afterwards.
 
 On Windows, chmod has to run inside the Podman machine (or WSL): the host
 `os.chmod` only toggles the read-only bit and does not change the mode the
-container sees. Paths like `D:\\rest\\local_llm` are passed as
-`/mnt/d/rest/local_llm`, the same mapping `deploy.py` uses for CODEBASE_PATH.
+container sees. Paths like `D:\\rest\\pumba` are passed as
+`/mnt/d/rest/pumba`, the same mapping `deploy.py` uses for CODEBASE_PATH.
 
 Usage (from the repo root):
     python scripts/host/fix_permissions.py

@@ -4,9 +4,14 @@ from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
+import product
 from agent_client import AgentError
 from mcp.server.fastmcp.exceptions import ToolError
 from server import ask, mcp
+
+
+def test_mcp_server_name_matches_product() -> None:
+    assert mcp.name == product.MCP_SERVER
 
 
 @pytest.mark.asyncio

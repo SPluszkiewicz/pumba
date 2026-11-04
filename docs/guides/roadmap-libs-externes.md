@@ -36,7 +36,7 @@ Piste B  Git             ─┼─ en parallèle, rien n’est retiré
 Piste C  Subversion      ─┘
          │
          ▼
-Étape 2  Retirer du MCP local-llm les outils déjà couverts
+Étape 2  Retirer du MCP pumba les outils déjà couverts
          (A d’abord ; B et C ne retirent rien du MCP, ils n’y sont pas)
          │
          ▼
@@ -48,7 +48,7 @@ Piste C  Subversion      ─┘
             routes, tests, CONTRACTS.md
 ```
 
-La piste D (Claude Context) peut démarrer en même temps que A, B et C. On ne retire `lookup` du MCP `local-llm`, ni Qdrant, qu’une fois D vérifiée. Qdrant reste tant que `/ui` s’en sert.
+La piste D (Claude Context) peut démarrer en même temps que A, B et C. On ne retire `lookup` du MCP `pumba`, ni Qdrant, qu’une fois D vérifiée. Qdrant reste tant que `/ui` s’en sert.
 
 ## Étape 1 — ajouter, en parallèle
 
@@ -60,11 +60,11 @@ Trois configurations indépendantes. Chacune se vérifie seule. Aucune ne modifi
 | B | Serveur Git, seulement si la copie a un `.git` | `git_log` ou l’outil équivalent sur un fichier du dépôt |
 | C | svn-mcp, seulement si la copie a un `.svn` | `svn status` et un diff contre `BASE` |
 
-`scripts/host/workspaces.py` écrit ces entrées à côté de `local-llm`. `tests/scripts/test_workspaces.py` vérifie qu’un second `workspace` ne les efface pas. Les arguments de ligne de commande se prennent sur le README de chaque dépôt au moment du branchement.
+`scripts/host/workspaces.py` écrit ces entrées à côté de `pumba`. `tests/scripts/test_workspaces.py` vérifie qu’un second `workspace` ne les efface pas. Les arguments de ligne de commande se prennent sur le README de chaque dépôt au moment du branchement.
 
 Les outils d’écriture de Serena restent inutilisés : ils modifieraient la copie commune.
 
-## Étape 2 — retirer du MCP `local-llm`
+## Étape 2 — retirer du MCP `pumba`
 
 Dépend de A. B et C n’ont rien à retirer ici : ce MCP n’expose pas Git ni Subversion.
 

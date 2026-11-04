@@ -41,7 +41,7 @@ def test_resolve_venv_dir_keeps_a_windows_env_away_from_wsl(tmp_path):
 
 
 def test_venv_create_on_drvfs_copies_binaries():
-    cmd = install_deps.venv_create_command(Path("/usr/bin/python3"), Path("/mnt/d/rest/local_llm/.venv"))
+    cmd = install_deps.venv_create_command(Path("/usr/bin/python3"), Path("/mnt/d/rest/pumba/.venv"))
     assert "--copies" in cmd
 
 

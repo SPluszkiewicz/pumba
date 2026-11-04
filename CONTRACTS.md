@@ -37,7 +37,7 @@ you do - don't leave tag-only pins in the final Containerfiles).
 | Test/CI chat model (`llm` only, under the `test` compose profile) | `bartowski/Qwen2.5-0.5B-Instruct-GGUF` | `Qwen2.5-0.5B-Instruct-Q4_K_M.gguf` | tiny, CPU-only, used only by `tests/integration/test_smoke.py` |
 | QLoRA train base (`trainer`, `setup --hf-train-base`) | `Qwen/Qwen2.5-7B-Instruct` (HF safetensors) | `./models/hf/Qwen2.5-7B-Instruct/` | training only; inference stays on the GGUF chat model above |
 
-Optional chat files for the GPU cases (`24g-30b`, `48g-30b`, `48g-32b`, `evo-x5`) live in `scripts/container/fetch_models.py` as `EXTRA_MODELS`. `deploy.py up` does not download them. The default pin stays the 14B Q5 above. `evo-x5` is Mistral Small 4 (`unsloth/Mistral-Small-4-119B-2603-GGUF`, UD-Q5_K_M, three shards, alias `mistral-small-4` on the host). The CUDA `llm` image does not serve it.
+Optional chat files for the GPU cases (`24g-30b`, `48g-30b`, `48g-32b`, `evo-x5`) live in `scripts/container/fetch_models.py` as `EXTRA_MODELS`. `deploy.py up` does not download them. The default pin stays the 14B Q5 above. `evo-x5` is Mistral Small 4 (`unsloth/Mistral-Small-4-119B-2603-GGUF`, UD-Q5_K_M, three shards, alias `mistral-small-4` on the host). Its window is 262144, the model's trained context. The CUDA `llm` image does not serve it.
 
 **Important:** the `test` profile swaps only the **chat** model (`llm`) for
 the tiny one above - `embedder` always runs the real
@@ -53,8 +53,7 @@ container - see "Host prerequisites" below).
 
 ## Directory layout
 
-See the plan file (`local_llm_cpp_podman_33ad064d.plan.md` in the Cursor
-plans folder) for the full annotated tree. Key point for parallel work: each
+See the annotated tree in this file. Key point for parallel work: each
 component owns its own subtree and should not need to edit files outside it
 except where explicitly noted below (mostly: adding entries to `.env.example`
 if you introduce a new env var - append, don't restructure).
@@ -71,15 +70,17 @@ if you introduce a new env var - append, don't restructure).
   `core-net` or `tools-net`.
 - `publish-net` (not internal, no outbound route): `llm`, `mcp`, and `ui-proxy`.
   Docker Desktop does not publish a host port for a container that is only on
-  an internal network. `compose.docker.yaml` turns masquerade off;
-  `compose.podman.yaml` sets `no_default_route` (Podman rejects the Docker
-  option). `agent` stays off this network and has no egress.
+  an internal network. `config/compose/docker.yaml` turns masquerade off;
+  `config/compose/podman.yaml` sets `no_default_route` (Podman rejects the Docker
+  option). `agent` stays off this network and has no egress, except on
+  `evo-x5`: `config/compose/host-llm.yaml` adds it to `publish-net` so it can
+  call the host `llama-server`. That network still has no default route.
 
 ## Ports (container-internal; host publishes `docs`, plus `llm`, `mcp`, and `agent` on loopback)
 
 | Service | Port | Protocol |
 |---|---|---|
-| `llm` | 8080 | HTTP, OpenAI-compatible (`/v1/chat/completions`, `/props`, `/health`). Published **`127.0.0.1:8080` only** (`LLM_PORT`). Embedder and Qdrant stay unpublished. |
+| `llm` | 8080 | HTTP, OpenAI-compatible (`/v1/chat/completions`, `/props`, `/health`). Published **`127.0.0.1:8080` only** (`LLM_PORT`). On `evo-x5` this container is not started: the host process listens on `0.0.0.0:8080`. Embedder and Qdrant stay unpublished. |
 | `embedder` | 8081 | HTTP, OpenAI-compatible (`/v1/embeddings`, `/health`) |
 | `reranker` | 8082 | HTTP (`POST /v1/rerank`, `/health`). Same `llama-server` image as `embedder`, different model and pooling. Not published to the host. |
 | `qdrant` | 6333 | HTTP REST (`/collections/...`, `/healthz`) |
@@ -114,6 +115,7 @@ APP_REQUEST_TIMEOUT_SECONDS=172800   # whole POST /chat (app, deploy ask)
 
 # --- llm ---
 LLM_PORT=8080
+LLM_SERVE=container                   # container = compose llm; host = evo-x5 llama-server
 LLM_BASE_URL=http://llm:8080
 LLM_MODEL_PATH=/models/Qwen2.5-Coder-14B-Instruct-Q5_K_M.gguf
 LLM_ROUTER=1                          # 1 = --models-dir router; POST /models/load swaps without restart
@@ -121,8 +123,8 @@ LLM_MODELS_MAX=1                      # simultaneous loaded chat models
 LLM_LORA_PATH=                        # optional; e.g. /models/adapters/latest/adapter.gguf
 LLM_GPU_ARG=1                         # compose build arg; 0 = CPU-only image (.env.test)
 LLM_NGL=auto                          # 16g profile. 24g and 48g set 999 (see config/profiles/)
-LLM_CTX_SIZE=32768                    # llama-server -c; hard token window, not a VRAM cap
-LLM_CACHE_TYPE_K=q8_0                 # 16g and 24g. The 48g profile uses f16. CTX stays 32768
+LLM_CTX_SIZE=32768                    # llama-server -c for the 14B. evo-x5 sets 262144
+LLM_CACHE_TYPE_K=q8_0                 # 16g and 24g. The 48g profile uses f16. 14B CTX stays 32768
 LLM_CACHE_TYPE_V=q8_0                 # --cache-type-v
 LLM_PARALLEL=1                        # llama-server --parallel; one slot so the KV cache stays small
 LLM_GPU_MARGIN_MIB=2048               # --fit-target; MiB of VRAM left free. Extra layers go to CPU
@@ -375,8 +377,9 @@ Payload schema per point:
   "start_line": 12,
   "end_line": 40,
   "language": "cpp",
-  "git_blob_hash": "<sha1 of blob content, for idempotent re-index>",
-  "text": "<the chunk source text>"
+  "git_blob_hash": "<sha1 of blob content, for content-addressed dedupe>",
+  "text": "<the chunk source text>",
+  "checkouts": ["default"]
 }
 ```
 `language` is `cpp` for tree-sitter chunks and one of `markdown`, `cmake`,
@@ -393,7 +396,7 @@ service resolves its own paths against (`TOOLS_PROJECT_ROOT`, same default),
 so a `file_path` value from a Qdrant search result can be passed straight
 into a `tools` call (e.g. `/read-file?path=src/main.cpp`) with no
 adjustment. Don't reintroduce an `app/` prefix in either component.
-Point ID is derived deterministically from `hash(file_path + symbol_name + start_line)` so re-indexing the same chunk upserts rather than duplicates.
+Point ID is derived deterministically from `hash(file_path + git_blob_hash + symbol_name + start_line)` so unchanged files across branches/checkouts share the exact same points (embedded once), while divergent versions of a file coexist in the collection and are filtered by `checkouts` (`INDEXER_CHECKOUT_ID`).
 
 ## Host prerequisites
 

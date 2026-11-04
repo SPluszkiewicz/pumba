@@ -52,38 +52,47 @@ def process_file(
     store: vector_store.VectorStore,
     *,
     known_hash: str | None = None,
-) -> tuple[int, str]:
+    shared_blobs: set[tuple[str, str]] | None = None,
+) -> tuple[int, str, str]:
     """Chunk, embed, and upsert a single file.
 
-    Returns `(chunk_count, outcome)` where outcome is `indexed`, `skipped`
-    (blob hash already in Qdrant) or `empty` (no chunks). A changed file
-    has its previous points deleted first so renamed/moved symbols do not
-    leave orphans.
+    Returns `(chunk_count, outcome, blob_hash)` where outcome is `indexed`,
+    `skipped` (already linked to this checkout), `attach` (same blob already
+    embedded by another checkout — the caller batches the tag write), or
+    `empty` (no chunks). A changed file detaches this checkout from its
+    previous points first so renamed/moved symbols do not leave orphans.
     """
     rel_path = path.relative_to(root).as_posix()
     current_hash = chunker.compute_blob_hash(path.read_bytes(), root)
     if known_hash is not None and known_hash == current_hash:
-        return 0, "skipped"
+        return 0, "skipped", current_hash
 
     if known_hash is not None:
         store.delete_by_file_paths([rel_path])
 
+    if shared_blobs is not None and (rel_path, current_hash) in shared_blobs:
+        return 0, "attach", current_hash
+
     chunks = chunker.chunk_file(path, root)
     if not chunks:
-        return 0, "empty"
+        return 0, "empty", current_hash
     vectors = embeddings_client.embed_texts([c.text for c in chunks])
-    return store.upsert_chunks(chunks, vectors), "indexed"
+    return store.upsert_chunks(chunks, vectors), "indexed", current_hash
 
 
 def index_source_root(root: Path, store: vector_store.VectorStore) -> dict:
     """One full batch pass over `root`. Returns summary stats.
 
     Unchanged files (same `git_blob_hash` as already stored) are skipped.
-    Files present in the collection but absent from this walk are deleted
-    (tombstoned) at the end.
+    Blobs already embedded by another branch/checkout are linked without
+    re-embedding. Files present for this checkout in the collection but
+    absent from this walk are detached/deleted at the end.
     """
-    existing = store.listed_file_hashes()
+    snap = store.snapshot()
+    existing = snap.checkout_hashes
+    shared_blobs = snap.blobs
     seen: set[str] = set()
+    to_attach: list[tuple[str, str]] = []
     stats = {
         "files_scanned": 0,
         "files_indexed": 0,
@@ -98,7 +107,13 @@ def index_source_root(root: Path, store: vector_store.VectorStore) -> dict:
         rel_path = path.relative_to(root).as_posix()
         seen.add(rel_path)
         try:
-            chunk_count, outcome = process_file(path, root, store, known_hash=existing.get(rel_path))
+            chunk_count, outcome, blob_hash = process_file(
+                path,
+                root,
+                store,
+                known_hash=existing.get(rel_path),
+                shared_blobs=shared_blobs,
+            )
         except embeddings_client.EmbedderError as exc:
             stats["errors"] += 1
             _log("file_error", file=rel_path, error=str(exc))
@@ -108,7 +123,9 @@ def index_source_root(root: Path, store: vector_store.VectorStore) -> dict:
             _log("file_error", file=rel_path, error=repr(exc))
             continue
 
-        if outcome == "skipped":
+        if outcome in ("skipped", "attach"):
+            if outcome == "attach":
+                to_attach.append((rel_path, blob_hash))
             stats["files_skipped"] += 1
             _log("file_skipped", file=rel_path, reason="git_blob_hash")
             continue
@@ -116,6 +133,9 @@ def index_source_root(root: Path, store: vector_store.VectorStore) -> dict:
             stats["files_indexed"] += 1
             stats["chunks_indexed"] += chunk_count
         _log("file_processed", file=rel_path, chunks=chunk_count)
+
+    if to_attach:
+        store.attach_checkouts(to_attach, snapshot=snap)
 
     stale = [path for path in existing if path not in seen]
     if stale:
@@ -139,11 +159,17 @@ def _run_watch(root: Path, store: vector_store.VectorStore) -> None:
                 return
             rel_path = path.relative_to(root).as_posix() if path.is_absolute() else src_path
             try:
-                existing = store.listed_file_hashes()
-                chunk_count, outcome = process_file(
-                    path, root, store, known_hash=existing.get(rel_path)
+                snap = store.snapshot()
+                chunk_count, outcome, blob_hash = process_file(
+                    path,
+                    root,
+                    store,
+                    known_hash=snap.checkout_hashes.get(rel_path),
+                    shared_blobs=snap.blobs,
                 )
-                if outcome == "skipped":
+                if outcome == "attach":
+                    store.attach_checkouts([(rel_path, blob_hash)], snapshot=snap)
+                if outcome in ("skipped", "attach"):
                     _log("file_skipped", file=rel_path, reason="git_blob_hash", trigger="watch")
                 else:
                     _log("file_processed", file=rel_path, chunks=chunk_count, trigger="watch")

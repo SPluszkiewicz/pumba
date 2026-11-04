@@ -3,14 +3,11 @@ tree-sitter-language-pack grammars + this module's packing/windowing policy)."""
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "services" / "indexer"))
-
-import text_chunker  # noqa: E402
+import text_chunker
 
 BLOB = "0" * 40
 FENCE = "```"
@@ -105,7 +102,7 @@ class TestMarkdown:
 
 class TestCMake:
     SRC = """cmake_minimum_required(VERSION 3.20)
-project(local_llm_app LANGUAGES CXX)
+project(pumba_app LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 
@@ -122,7 +119,7 @@ add_test(NAME agent_client_test COMMAND agent_client_test)
         assert chunks[0].language == "cmake"
         assert (chunks[0].start_line, chunks[0].end_line) == (1, 10)
         # project / add_executable / add_executable / add_test names, capped at 3 + ellipsis.
-        assert chunks[0].symbol_name == "local_llm_app, app, agent_client_test, …"
+        assert chunks[0].symbol_name == "pumba_app, app, agent_client_test, …"
 
     def test_commands_split_when_window_is_exceeded(self):
         body = "".join(f"set(V{i} {i})\n" for i in range(19))

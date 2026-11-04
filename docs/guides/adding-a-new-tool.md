@@ -110,7 +110,7 @@ Add `tests/tools/test_<your_tool>_handler.py`. At minimum, cover:
   your handler actually calls `validate_path` (e.g. a `../` traversal
   attempt in one of your fields raises before any subprocess runs).
 
-Run the suite from the repo root. The root `pytest.ini` sets
+Run the suite from the repo root. `pyproject.toml` sets
 `asyncio_mode = auto` and the `tests/<service>/conftest.py` files put the
 service directory on `sys.path`; the `tests/tools` files also insert the
 repo root themselves (`from services.tools.handlers import ...`), so copy

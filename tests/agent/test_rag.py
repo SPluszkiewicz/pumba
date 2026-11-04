@@ -30,6 +30,19 @@ def _client_with_handler(handler) -> httpx.AsyncClient:
     return httpx.AsyncClient(transport=httpx.MockTransport(handler))
 
 
+def test_hybrid_query_body_filters_by_active_checkout() -> None:
+    from scope import active_checkout_id
+
+    token = active_checkout_id.set("co_branch_2")
+    try:
+        body = rag.hybrid_query_body([0.1, 0.2], "Widget::size", 5)
+    finally:
+        active_checkout_id.reset(token)
+
+    for leg in body["prefetch"]:
+        assert leg["filter"] == {"must": [{"key": "checkouts", "match": {"value": "co_branch_2"}}]}
+
+
 @pytest.mark.asyncio
 async def test_embed_query_uses_search_query_prefix() -> None:
     def handler(request: httpx.Request) -> httpx.Response:

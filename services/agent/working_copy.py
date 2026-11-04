@@ -56,13 +56,22 @@ async def overlay_hits(
 ) -> list[dict[str, Any]]:
     if checkout is None:
         return [{**hit, "source": hit.get("source") or "index"} for hit in hits]
-    live = await _live_texts(
-        http_client,
-        request_id,
-        checkout,
-        tools_base_url=tools_base_url,
-        windows=_windows_for_hits(hits),
-    )
+    if checkout.vcs == "none":
+        live = await _live_texts_without_vcs(
+            http_client,
+            request_id,
+            checkout,
+            hits,
+            tools_base_url=tools_base_url,
+        )
+    else:
+        live = await _live_texts(
+            http_client,
+            request_id,
+            checkout,
+            tools_base_url=tools_base_url,
+            windows=_windows_for_hits(hits),
+        )
     if not live:
         return [{**hit, "source": "index"} for hit in hits]
     return merge_hits(hits, live)
@@ -125,10 +134,54 @@ def _windows_for_hits(hits: list[dict[str, Any]]) -> dict[str, tuple[int, int]]:
         path = str(hit.get("file_path") or "").replace("\\", "/")
         if not path:
             continue
+        end = int(hit.get("end_line") or 1)
+        windows[path] = (1, max(MAX_OVERLAY_LINES, end))
+    return windows
+
+
+async def _live_texts_without_vcs(
+    http_client: httpx.AsyncClient,
+    request_id: str,
+    checkout: Checkout,
+    hits: list[dict[str, Any]],
+    *,
+    tools_base_url: str,
+) -> dict[str, str]:
+    """For a checkout without `.git`/`.svn` (e.g. `sample/`), compare each hit's indexed lines with disk."""
+    live: dict[str, str] = {}
+    seen: set[str] = set()
+    for hit in hits[:MAX_OVERLAY_FILES]:
+        path = str(hit.get("file_path") or "").replace("\\", "/")
+        if not path or path in seen:
+            continue
+        seen.add(path)
         start = int(hit.get("start_line") or 1)
         end = int(hit.get("end_line") or start)
-        windows[path] = (start, min(end, start + MAX_OVERLAY_LINES - 1))
-    return windows
+        indexed_excerpt = str(hit.get("excerpt") or "").replace("\r\n", "\n").strip()
+        raw_span = await _read_raw_window(
+            http_client,
+            request_id,
+            checkout.mount,
+            path,
+            start,
+            end,
+            tools_base_url=tools_base_url,
+        )
+        if raw_span is None:
+            continue
+        if clip_excerpt(raw_span) != indexed_excerpt:
+            full_window = await _read_raw_window(
+                http_client,
+                request_id,
+                checkout.mount,
+                path,
+                1,
+                max(MAX_OVERLAY_LINES, end),
+                tools_base_url=tools_base_url,
+            )
+            if full_window and full_window.strip():
+                live[path] = full_window.replace("\r\n", "\n").strip()
+    return live
 
 
 async def _live_texts(
@@ -187,7 +240,7 @@ async def _status_stdout(
     return str(body.get("stdout") or "")
 
 
-async def _read_lines(
+async def _read_raw_window(
     http_client: httpx.AsyncClient,
     request_id: str,
     mount: str,
@@ -210,5 +263,29 @@ async def _read_lines(
         return None
     if response.status_code >= 400 or not isinstance(body, dict) or not body.get("ok", True):
         return None
-    text = str(body.get("stdout") or "").strip()
+    return str(body.get("stdout") or "")
+
+
+async def _read_lines(
+    http_client: httpx.AsyncClient,
+    request_id: str,
+    mount: str,
+    path: str,
+    start: int,
+    end: int,
+    *,
+    tools_base_url: str,
+) -> Optional[str]:
+    raw = await _read_raw_window(
+        http_client,
+        request_id,
+        mount,
+        path,
+        start,
+        end,
+        tools_base_url=tools_base_url,
+    )
+    if raw is None:
+        return None
+    text = raw.strip()
     return text or None

@@ -163,6 +163,16 @@ def _node_text(node: Optional[Node], source: bytes) -> Optional[str]:
     return source[node.start_byte : node.end_byte].decode("utf-8", errors="replace")
 
 
+def _has_function_declarator(node: Optional[Node]) -> bool:
+    if node is None:
+        return False
+    if node.type == "function_declarator":
+        return True
+    if node.type in _DECLARATOR_WRAPPER_TYPES:
+        return _has_function_declarator(node.child_by_field_name("declarator"))
+    return False
+
+
 def _find_name_node(node: Optional[Node]) -> Optional[Node]:
     """Walk a declarator chain down to the innermost name-bearing node.
 
@@ -295,6 +305,19 @@ def chunk_source(
             chunks.extend(
                 _fit_embedder_context(_make_chunk(rel_path, symbol_name, range_node, content, blob_hash))
             )
+        elif node.type == "declaration" and not _ancestor_class_names(node, content):
+            declarator = node.child_by_field_name("declarator")
+            if _has_function_declarator(declarator):
+                name_node = _find_name_node(declarator)
+                own_name = _node_text(name_node, content)
+                if own_name is not None:
+                    symbol_name = _qualify(node, own_name, content)
+                    range_node = _effective_range_node(node)
+                    chunks.extend(
+                        _fit_embedder_context(
+                            _make_chunk(rel_path, symbol_name, range_node, content, blob_hash)
+                        )
+                    )
 
     if not chunks:
         # File has real content (e.g. only macros/globals/typedefs, no

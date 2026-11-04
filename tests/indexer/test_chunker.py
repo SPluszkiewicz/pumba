@@ -7,10 +7,7 @@ existing or being in any particular state.
 
 import hashlib
 import subprocess
-import sys
 from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "services" / "indexer"))
 
 import chunker
 import pytest
@@ -73,6 +70,18 @@ int Widget::size() const {
         method = _by_symbol(chunks, "Widget::size")
         assert method.start_line == 6
         assert method.end_line == 8
+
+    def test_free_function_declaration_alongside_class_is_indexed(self):
+        src = """class CalcError {};
+
+int Evaluate(int x);
+"""
+        chunks = _chunk(src, rel_path="src/calculator.hpp")
+        cls = _by_symbol(chunks, "CalcError")
+        decl = _by_symbol(chunks, "Evaluate")
+        assert cls.start_line == 1
+        assert decl.start_line == 3
+        assert "Evaluate" in decl.text
 
 
 class TestEdgeCases:

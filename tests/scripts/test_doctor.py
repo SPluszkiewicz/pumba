@@ -13,6 +13,7 @@ from types import SimpleNamespace
 
 import deploy
 import fetch_models
+import product
 
 # --------------------------------------------------------------------------- _parse_env_file
 
@@ -48,10 +49,10 @@ def test_parse_env_file_parses_key_value_pairs(tmp_path):
 def test_parse_compose_ps_health_detects_all_states():
     output = "\n".join(
         [
-            "local_llm-qdrant-1    Up 2 minutes (healthy)",
-            "local_llm-llm-1       Up 10 seconds (unhealthy)",
-            "local_llm-embedder-1  Up 2 seconds (health: starting)",
-            "local_llm-tools-1     Up 3 minutes",
+            f"{product.COMPOSE_PROJECT}-qdrant-1    Up 2 minutes (healthy)",
+            f"{product.COMPOSE_PROJECT}-llm-1       Up 10 seconds (unhealthy)",
+            f"{product.COMPOSE_PROJECT}-embedder-1  Up 2 seconds (health: starting)",
+            f"{product.COMPOSE_PROJECT}-tools-1     Up 3 minutes",
         ]
     )
 
@@ -71,7 +72,7 @@ def test_parse_compose_ps_health_detects_all_states():
 def test_parse_compose_ps_health_unhealthy_not_misread_as_healthy():
     # "unhealthy" contains "healthy" as a substring - make sure the more
     # specific state wins rather than the substring match.
-    output = "local_llm-llm-1  Up 1 minute (unhealthy)"
+    output = f"{product.COMPOSE_PROJECT}-llm-1  Up 1 minute (unhealthy)"
     statuses = deploy._parse_compose_ps_health(output, ["llm"])
     assert statuses["llm"] == "unhealthy"
 
@@ -282,10 +283,10 @@ def test_doctor_check_disk_space_ok_above_budget(monkeypatch):
 def test_doctor_check_services_reports_each_state(monkeypatch):
     ps_output = "\n".join(
         [
-            "local_llm-qdrant-1    Up 2 minutes (healthy)",
-            "local_llm-llm-1       Up 10 seconds (unhealthy)",
-            "local_llm-embedder-1  Up 2 seconds (health: starting)",
-            "local_llm-tools-1     Up 3 minutes",
+            f"{product.COMPOSE_PROJECT}-qdrant-1    Up 2 minutes (healthy)",
+            f"{product.COMPOSE_PROJECT}-llm-1       Up 10 seconds (unhealthy)",
+            f"{product.COMPOSE_PROJECT}-embedder-1  Up 2 seconds (health: starting)",
+            f"{product.COMPOSE_PROJECT}-tools-1     Up 3 minutes",
         ]
     )
     monkeypatch.setattr(
@@ -300,6 +301,28 @@ def test_doctor_check_services_reports_each_state(monkeypatch):
     assert statuses["embedder"] == "warn"
     assert statuses["tools"] == "warn"
     assert statuses["agent"] == "warn"  # not_found
+
+
+def test_doctor_checks_host_llm_when_profile_is_evo(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *a, **k: SimpleNamespace(
+            returncode=0,
+            stdout=f"{product.COMPOSE_PROJECT}-qdrant-1 Up 2 minutes (healthy)\n",
+        ),
+    )
+    env_file = tmp_path / ".env"
+    env_file.write_text("LLM_SERVE=host\n", encoding="utf-8")
+    monkeypatch.setattr(deploy, "ENV_FILE", env_file)
+    pid_file = tmp_path / "host-llm.pid"
+    pid_file.write_text("4242", encoding="utf-8")
+    monkeypatch.setattr(deploy, "HOST_LLM_PID", pid_file)
+    monkeypatch.setattr(deploy, "_host_llm_alive", lambda pid: pid == 4242)
+
+    checks = {c.name: c for c in deploy._doctor_check_services()}
+    assert checks["llm"].status == "ok"
+    assert "4242" in checks["llm"].detail
 
 
 def test_doctor_check_services_fails_when_compose_ps_errors(monkeypatch):
@@ -378,6 +401,7 @@ def test_render_html_escapes_and_includes_status_classes():
     assert "status-fail" in output
     assert "status-ok" in output
     assert "fix it" in output
+    assert f"{product.NAME} doctor report" in output
 
 
 def test_render_html_omits_hint_for_ok_checks():

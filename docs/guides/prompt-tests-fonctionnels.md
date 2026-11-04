@@ -1,6 +1,40 @@
 # Prompt — tests fonctionnels
 
-Copie le bloc ci-dessous dans un agent qui voit le dépôt et les outils MCP `local-llm`. Une étape par message. Recopie le texte de l'outil. N'invente pas un résultat.
+Exécution automatique (23 vérifications de bout en bout) contre la pile en marche :
+
+```bash
+python scripts/deploy.py check
+```
+
+Le script `scripts/host/functional_check.py` vérifie automatiquement :
+
+1. **Portes hôtes & CSP `/ui`** (`GET /health` sur `agent`, `mcp`, `llm` et `GET /ui`).
+2. **Authentification Bearer** (`401` sans jeton et avec jeton invalide).
+3. **Isolation des workspaces** (`400` sur un `X-Workspace` non enregistré).
+4. **Catalogue de modèles** (`GET /models`).
+5. **`lookup` — déclaration** (`Evaluate` dans `src/calculator.hpp:23` en tête, sans fichiers parasites).
+6. **`lookup` — trace hybride + reranker** (`include_candidates=True`).
+7. **`lookup` — symbole absent** (`Zorglub42` n'invente aucun symbole).
+8. **Lecture bornée (`/read`)** (fenêtre de lignes `start_line`..`end_line`).
+9. **Blocage de traversée de chemin** (`../../etc/passwd` rejeté).
+10. **`check` — compilation unitaire (`compile_file`)** (`src/calculator.cpp`, code de sortie `0`).
+11. **`check` — build CMake complet (`build`)** (preset `release`, code de sortie `0`).
+12. **`check` — filtre `ctest` (`test`)** (`filter=known_bug` échoue avec le journal de test).
+13. **LSP `outline`** (`src/calculator.hpp` : `CalcError` et `Evaluate`).
+14. **LSP `calls`** (`src/calculator.cpp:118:5` : appelants dans `tests/calculator_test.cpp`).
+15. **LSP `types`** (`src/calculator.hpp:18:7` : `runtime_error` dans `stdexcept`).
+16. **Protocole MCP Streamable HTTP (`:8092/mcp`)** (`tools/list` + `tools/call` sur les 6 outils : `lookup`, `check`, `outline`, `calls`, `types`, `ask`).
+17. **`/chat` — route directe** (`2+2` sans RAG).
+18. **`/chat` — route code avec citations** (`Evaluate` cite `src/calculator.hpp:23`).
+19. **`/chat` — mémoire multi-tour** (`conversation_id` conservé d'un tour à l'autre).
+20. **`/chat` — jugement borné sans outils** (`enable_tools=False`, citations vérifiées).
+21. **`/chat` — boucle d'appel d'outils (`tool_calls`)** (le modèle appelle `list_files` et exploite le résultat).
+22. **Flux SSE `/chat/stream` + `/chat/cancel`** (événements `meta`, `route`, `context`, `token`, `done`).
+23. **Overlay `[working copy]`** (modification locale non commitée dans `sample/src/calculator.hpp` détectée immédiatement devant l'index puis restaurée).
+
+---
+
+Pour tester manuellement depuis un client MCP (Cursor, VS Code, Continue), copie le bloc ci-dessous. Une étape par message. Recopie le texte de l'outil. N'invente pas un résultat.
 
 ---
 

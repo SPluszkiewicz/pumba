@@ -5,7 +5,7 @@ new, read [Comprendre sans bagage](../concepts/en-clair.md) first (French).
 Install and the first question are in
 [First run](../getting-started/first-run.md). Shapes of HTTP requests are
 in [Agent API](../reference/agent-api.md). The editor doors are in
-[Using VS Code](vscode.md).
+[VS Code et Continue.dev](vscode.md).
 
 ## What a question does
 
@@ -26,21 +26,24 @@ Tools the model can call on the `code` path: `build`, `test`,
 `search`, `list_files`, `read_file`, `git_log`, `git_blame`, `git_diff`,
 `git_show`, `svn_status`, `svn_diff`, `svn_log`, `lsp_definition`,
 `lsp_references`, `lsp_hover`, `lsp_symbols`, `lsp_outline`, `lsp_calls`,
-`lsp_types`. `read_file` returns at most
+`lsp_types`, `build_step`, `begin_plan`, `edit`, and `apply`. `read_file` returns at most
 400 lines. `search` and `list_files` are capped. For C++ names, the model
 is told to prefer clangd over text search.
 
-Nothing is written into the tree. Git and SVN tools are read-only.
+Git and SVN tools are read-only. `edit` returns a diff and does not write.
+`apply` writes that copy through `patch`. There is no commit and no push.
 
 ## A repository of thousands of files
 
-The 32 768-token window does not hold the tree. The index does.
+The window does not hold the tree (32768 on the 14B, 262144 on `evo-x5`). The index does.
 
 1. From this repo: `python scripts/deploy.py workspace d:/svn/ticket-142`.
    The checkout is registered by its remote URL (git origin, or the
-   Subversion repository root). The first checkout of that URL is indexed.
-   A second ticket of the same URL only records the path. `--update` runs
-   an incremental pass into the shared collection.
+   Subversion repository root). The first checkout of that URL embeds the
+   tree. A second checkout or branch of the same URL attaches its
+   `checkout_id` to unchanged `git_blob_hash` points without re-embedding,
+   and only embeds the files that differ on that branch. `--update`
+   refreshes that checkout's blobs in the shared collection.
 2. Open that folder in VS Code. `.vscode/mcp.json` sends `X-Workspace` with
    the checkout path. Each question uses that copy's files and the shared
    index. Uncommitted edits are read live and are not written into the index.
@@ -102,7 +105,7 @@ probe fails. It does not write `LLM_GPU_ARG=0` back into `.env`.
 - From Cursor or VS Code, MCP exposes facts (`lookup`, `check`, `outline`,
   `calls`, `types`) and a short `ask`. `ask` does not search or build.
   Register the checkout first (`python scripts/deploy.py workspace <path>`),
-  which writes `X-Workspace`. See [Using VS Code](vscode.md).
+  which writes `X-Workspace`. See [VS Code et Continue.dev](vscode.md).
   A campaign that checks those tools one by one is
   [Tests fonctionnels](prompt-tests-fonctionnels.md).
 - **Arrêter** calls `POST /chat/cancel`. That drops the in-flight model

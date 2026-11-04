@@ -7,16 +7,12 @@ client (no real network calls, no dependency on a running `embedder`).
 from __future__ import annotations
 
 import json
-import sys
-from pathlib import Path
 from typing import Any, Callable, Optional
 
 import httpx
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "services" / "indexer"))
-
-import embeddings_client  # noqa: E402
+import embeddings_client
 from embeddings_client import EmbedderRequestError, embed_texts  # noqa: E402
 
 

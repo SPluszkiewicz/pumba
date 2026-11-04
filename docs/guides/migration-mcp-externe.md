@@ -9,7 +9,7 @@ Le client (Cursor, VS Code, Claude Code) assemble plusieurs serveurs. Ce dépôt
 | `git_log`, `git_blame`, `git_diff`, `git_show` | Serveur MCP Git | Le poste, si la copie a un `.git` |
 | `svn_status`, `svn_diff`, `svn_log` | [svn-mcp](https://github.com/WillBrock/svn-mcp/) | Le poste, si la copie a un `.svn` |
 | `lookup` et l’index Qdrant vus par l’éditeur | [Claude Context](https://github.com/zilliztech/claude-context) | Milvus + embedder, index de la copie du poste |
-| `check` (`build`, `test`, `compile`) et `ask` | MCP `local-llm` de ce dépôt | La machine qui a le GPU |
+| `check` (`build`, `test`, `compile`) et `ask` | MCP `pumba` de ce dépôt | La machine qui a le GPU |
 
 Serena, le filesystem, Git et svn-mcp lisent les fichiers du poste. Une copie arrêtée sur une ancienne révision et des modifications non commitées sont donc l’arbre réel, sans index central à aligner.
 
@@ -22,11 +22,11 @@ Serena, le filesystem, Git et svn-mcp lisent les fichiers du poste. Une copie ar
 
 ## 1. Configuration écrite dans chaque copie
 
-`python scripts/deploy.py workspace` écrit aujourd’hui `.vscode/mcp.json` avec `local-llm` et `atlassian`.
+`python scripts/deploy.py workspace` écrit aujourd’hui `.vscode/mcp.json` avec `pumba` et `atlassian`.
 
 | Fichier | Mise à jour |
 |---|---|
-| `scripts/host/workspaces.py` (`install_vscode_mcp`, `ATLASSIAN_MCP_SERVER`) | Ajouter `serena`, `filesystem`, `git`, `svn` et `claude-context` à côté de `local-llm`. Le chemin `X-Workspace` reste sur `local-llm` seulement. Les autres serveurs reçoivent le dossier de la copie comme racine. |
+| `scripts/host/workspaces.py` (`install_vscode_mcp`, `ATLASSIAN_MCP_SERVER`) | Ajouter `serena`, `filesystem`, `git`, `svn` et `claude-context` à côté de `pumba`. Le chemin `X-Workspace` reste sur `pumba` seulement. Les autres serveurs reçoivent le dossier de la copie comme racine. |
 | `tests/scripts/test_workspaces.py` | Le test qui pose `X-Workspace` doit accepter les nouveaux serveurs et vérifier qu’un second appel ne les efface pas. |
 | `.vscode/mcp.json` et `sample/.vscode/mcp.json` | Même forme, pour la copie de travail de ce dépôt et pour `sample/`. |
 | `.cursor/mcp.json` s’il est versionné | Cursor attend `mcpServers`, pas `servers`. Deux fichiers, ou un générateur qui écrit les deux. |
@@ -36,7 +36,7 @@ Forme VS Code à produire :
 ```json
 {
   "servers": {
-    "local-llm": {
+    "pumba": {
       "type": "http",
       "url": "http://127.0.0.1:8092/mcp",
       "headers": { "X-Workspace": "D:/svn/ticket-142" }
@@ -69,7 +69,7 @@ Les arguments exacts de `svn-mcp` et de Serena se vérifient sur leur README au 
 
 Claude Context a besoin d’un Milvus et d’un embedder (Ollama en local). Son entrée MCP pointe vers ce Milvus, et l’index se construit sur le dossier du poste (`index_codebase`), pas sur la collection Qdrant de ce dépôt.
 
-## 2. MCP `local-llm` : retirer les outils couverts ailleurs
+## 2. MCP `pumba` : retirer les outils couverts ailleurs
 
 L’éditeur ne doit plus voir deux outils pour le même geste.
 
@@ -80,10 +80,10 @@ L’éditeur ne doit plus voir deux outils pour le même geste.
 | `tests/mcp/test_server.py` | Les cas `outline`, `calls`, `types`, `lookup` partent avec les outils. Garder les cas `check` et `ask`. |
 | `tests/mcp/test_agent_client.py` | Même découpe. |
 | `CONTRACTS.md` | La section MCP ne liste plus ces outils. Les routes HTTP de `tools` restent tant que `/ui` les utilise. |
-| `docs/reference/mcp.md` | Décrire les serveurs voisins et le fait que `local-llm` ne fait plus que `check` et `ask`. |
+| `docs/reference/mcp.md` | Décrire les serveurs voisins et le fait que `pumba` ne fait plus que `check` et `ask`. |
 | `docs/guides/vscode.md` | Montrer le `mcp.json` complet. |
 | `docs/guides/using-the-assistant.md` | La liste des outils MCP de l’éditeur devient la table du haut de ce guide. |
-| `docs/guides/prompt-tests-fonctionnels.md` | Les étapes 1 et 2 (`lookup`) visent Claude Context. Les étapes 4, 5 et 6 (`outline`, `calls`, `types`) visent Serena. L’étape 3 (`check`) et l’étape 7 (`ask`) restent sur `local-llm`. L’étape 9 (fichier sale) se vérifie sur Serena ou le filesystem, qui lisent le fichier du poste. |
+| `docs/guides/prompt-tests-fonctionnels.md` | Les étapes 1 et 2 (`lookup`) visent Claude Context. Les étapes 4, 5 et 6 (`outline`, `calls`, `types`) visent Serena. L’étape 3 (`check`) et l’étape 7 (`ask`) restent sur `pumba`. L’étape 9 (fichier sale) se vérifie sur Serena ou le filesystem, qui lisent le fichier du poste. |
 
 ## 3. Modèle local (`/ui`) : deuxième temps
 
@@ -125,6 +125,6 @@ Claude Context a son propre stock (Milvus) et son propre embedder. Le brancher s
 
 1. Étendre `install_vscode_mcp` et tenir les tests de `tests/scripts/test_workspaces.py`.
 2. Vérifier à la main, sur une copie Git et sur une copie SVN, que Serena, le filesystem et le serveur de VCS répondent depuis l’éditeur.
-3. Retirer du MCP `local-llm` les outils alors couverts, puis adapter `docs/guides/prompt-tests-fonctionnels.md`.
-4. Brancher Claude Context et son Milvus. Retirer `lookup` du MCP `local-llm` ensuite.
+3. Retirer du MCP `pumba` les outils alors couverts, puis adapter `docs/guides/prompt-tests-fonctionnels.md`.
+4. Brancher Claude Context et son Milvus. Retirer `lookup` du MCP `pumba` ensuite.
 5. Décider si `/ui` continue d’utiliser les outils internes. Si oui, s’arrêter là. Si non, appliquer la section 3 en un seul changement, schéma, prompts, routes et tests ensemble.

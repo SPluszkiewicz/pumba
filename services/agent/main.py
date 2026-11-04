@@ -26,9 +26,11 @@ from checkouts import Checkout, UnknownWorkspace, fetch_local_note, resolve_work
 from cited_files import named_file_block
 from common.logging import bind_request_id, clear_request_context, get_logger
 from common.metrics import instrument_app, observe_rag
+from common.product import NAME as PRODUCT_NAME
+from common.product import SLUG as PRODUCT_SLUG
 from conversations import STORE
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from gate import decide
 from llm_client import active_model
 from model_catalog import fetch_models, select_model
@@ -43,7 +45,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from rag import RagResult, clip_excerpt, retrieval_trace, retrieve_context
 from reflect import reflect_answer
 from review import review_change
-from scope import project_root_header, qdrant_collection
+from scope import active_checkout_id, project_root_header, qdrant_collection
 from tool_loop import TOOLS_BASE_URL, EventCallback, run_tool_loop
 from turns import TURNS, TurnCancelled
 from working_copy import overlay_chunks, overlay_hits
@@ -429,11 +431,15 @@ async def choose_model(
 
 
 @app.get("/ui")
-async def ui_page() -> FileResponse:
+async def ui_page() -> HTMLResponse:
     """Chat page. No bearer: the token is typed into the page and sent only on /chat/stream."""
-    return FileResponse(
-        _UI_PATH,
-        media_type="text/html; charset=utf-8",
+    html = (
+        _UI_PATH.read_text(encoding="utf-8")
+        .replace("{{PRODUCT_NAME}}", PRODUCT_NAME)
+        .replace("{{PRODUCT_SLUG}}", PRODUCT_SLUG)
+    )
+    return HTMLResponse(
+        html,
         headers={"Content-Security-Policy": _UI_CSP, "Cache-Control": "no-cache"},
     )
 
@@ -443,10 +449,12 @@ def _bind_checkout(raw: Optional[str]) -> Optional[Checkout]:
     if not (raw or "").strip():
         project_root_header.set("")
         qdrant_collection.set("")
+        active_checkout_id.set("")
         return None
     checkout = resolve_workspace(raw or "")
     project_root_header.set(checkout.mount)
     qdrant_collection.set(checkout.collection)
+    active_checkout_id.set(checkout.id)
     log.info(
         "workspace_selected",
         checkout=checkout.id,

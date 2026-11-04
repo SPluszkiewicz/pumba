@@ -7,7 +7,7 @@ it needs the GPU machine, the GGUF files, and a registered `sample` checkout.
 
     python scripts/host/profile_campaign.py
     python scripts/host/profile_campaign.py --vram 24576
-    python scripts/host/profile_campaign.py --run --workspace D:/rest/local_llm/sample
+    python scripts/host/profile_campaign.py --run --workspace D:/rest/pumba/sample
 
 `--run` copies `.env` to `state/profile-campaign.env.bak` first. The report
 is `state/profile-campaign.json`. Neither file is committed.

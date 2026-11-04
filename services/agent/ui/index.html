@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Assistant local</title>
+  <title>{{PRODUCT_NAME}}</title>
   <style>
     :root { color-scheme: dark; }
     * { box-sizing: border-box; }
@@ -113,7 +113,7 @@
 </head>
 <body>
   <header>
-    <h1>Assistant local</h1>
+    <h1>{{PRODUCT_NAME}}</h1>
     <p class="hint">Le jeton reste dans cet onglet. Le déroulement indique d'abord si la question part en réponse directe ou passe par l'index et les outils. Les réponses sont en Markdown ; chaque bloc de code a un bouton Copier. Un correctif proposé est un bloc diff à copier : il n'est pas appliqué.</p>
   </header>
   <main>
@@ -149,7 +149,7 @@
     <p id="status"></p>
   </main>
   <script>
-    const TOKEN_KEY = "local_llm_token";
+    const TOKEN_KEY = "{{PRODUCT_SLUG}}_token";
     const tokenInput = document.getElementById("token");
     const logEl = document.getElementById("log");
     const statusEl = document.getElementById("status");

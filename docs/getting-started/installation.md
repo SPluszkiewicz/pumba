@@ -4,26 +4,24 @@
 
 ```bash
 git clone <this-repo-url>
-cd local_llm
+cd pumba
 ```
 
-## 2. Configure environment variables
-
-Copy the example env file and fill in a real bearer token:
+## 2. Start the stack
 
 ```bash
-cp .env.example .env
+python scripts/deploy.py up
 ```
 
-Edit `.env` and replace `AGENT_BEARER_TOKEN`'s placeholder value with a real
-random secret (e.g. `python3 -c "import secrets; print(secrets.token_urlsafe(32))"`
-run inside `devtools`, or any password generator). Every other value in
-`.env.example` has a sensible default - see `CONTRACTS.md` for what each one
-does.
+The first `up` copies `.env.example` to `.env` if needed and writes a random
+`AGENT_BEARER_TOKEN` into it. The token is not printed; copy it from `.env`
+into the UI **Jeton** field. Every other value in `.env.example` has a
+sensible default - see `CONTRACTS.md` for what each one does.
 
-## 3. Start the stack
+To pick a GPU case first (no container engine required):
 
 ```bash
+python scripts/deploy.py gpu-profile evo-x5
 python scripts/deploy.py up
 ```
 
@@ -33,12 +31,17 @@ Podman CLI with no machine makes this continue inside the WSL distro
 `local-llm`. `CONTAINER_RUNTIME=docker` uses Docker Desktop. Do not chmod
 the tree first, and do not create a virtualenv first.
 
+On the GMKtec EVO-X5 Pro, follow [Déployer sur l'EVO-X5](../guides/evo-x5.md).
+`up` starts `llama-server` on the host and does not start the `llm`
+container. The hand-written compose line below is the NVIDIA path: it
+starts that container.
+
 The same work, run by hand where the engine already works:
 
 ```bash
 podman compose --profile setup run --rm fetch-models
 podman compose build
-podman compose up -d qdrant llm embedder reranker tools agent ui-proxy mcp
+podman compose up -d qdrant llm embedder reranker tools patch agent ui-proxy mcp
 podman compose --profile index run --rm indexer
 ```
 

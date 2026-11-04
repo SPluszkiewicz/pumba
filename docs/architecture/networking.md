@@ -85,4 +85,6 @@ internet access, ever, is `fetch-models`, and only while that specific
 one-off job is running. `ui-proxy` is on `publish-net` (no outbound route) so
 the engine will bind `127.0.0.1:8090`; it only forwards that port to `agent`.
 `llm` and `mcp` are also on `publish-net` so the host can reach
-`127.0.0.1:8080` and `127.0.0.1:8092`. Embedder and Qdrant stay off that network.
+`127.0.0.1:8080` and `127.0.0.1:8092`. On `evo-x5`, `config/compose/host-llm.yaml`
+also puts `agent` on `publish-net`: the chat model is the host process,
+and that network still has no default route. Embedder and Qdrant stay off that network.

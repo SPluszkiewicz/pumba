@@ -10,6 +10,7 @@ import json
 import subprocess
 import threading
 from typing import IO, Any, Optional
+from urllib.parse import unquote, urlsplit
 
 __all__ = [
     "ClangdError",
@@ -53,9 +54,15 @@ class MessageReader:
             raise ClangdError("clangd message is not an object")
         return parsed
 
+    def _read_some(self, size: int) -> bytes:
+        read1 = getattr(self._stream, "read1", None)
+        if callable(read1):
+            return read1(size)
+        return self._stream.read(size)
+
     def _read_until(self, marker: bytes) -> Optional[bytes]:
         while marker not in self._buf:
-            chunk = self._stream.read(4096)
+            chunk = self._read_some(4096)
             if not chunk:
                 return None
             self._buf += chunk
@@ -67,7 +74,7 @@ class MessageReader:
 
     def _read_exact(self, length: int) -> Optional[bytes]:
         while len(self._buf) < length:
-            chunk = self._stream.read(max(length - len(self._buf), 4096))
+            chunk = self._read_some(max(length - len(self._buf), 4096))
             if not chunk:
                 return None
             self._buf += chunk
@@ -91,6 +98,7 @@ class ClangdSession:
         self._lock = threading.Lock()
         self._next_id = 0
         self._proc: Optional[subprocess.Popen[bytes]] = None
+        self.opened_docs: dict[str, int] = {}
 
     @classmethod
     def spawn(cls, argv: list[str], cwd: str) -> ClangdSession:
@@ -225,8 +233,8 @@ def format_related_symbols(
         start = range_.get("start") if isinstance(range_, dict) else {}
         line_no = int((start or {}).get("line") or 0) + 1
         if isinstance(uri, str):
-            rel = _relative_uri(uri, project_root_uri_prefix)
-            if rel is None:
+            rel = _relative_uri(uri, project_root_uri_prefix) or _external_header_uri(uri)
+            if not rel:
                 continue
             where = f"{rel}:{line_no}"
         else:
@@ -264,3 +272,15 @@ def _relative_uri(uri: str, prefix: str) -> Optional[str]:
     if not rel or ".." in rel.split("/"):
         return None
     return rel
+
+
+def _external_header_uri(uri: str) -> Optional[str]:
+    """Basename of a compiler/system header. Other absolute paths stay hidden."""
+    if not uri.startswith("file:"):
+        return None
+    path = unquote(urlsplit(uri).path).replace("\\", "/")
+    lowered = path.lower()
+    if "/include/" not in lowered and "/c++/" not in lowered and "/c%2b%2b/" not in lowered:
+        return None
+    name = path.rsplit("/", 1)[-1]
+    return name or None

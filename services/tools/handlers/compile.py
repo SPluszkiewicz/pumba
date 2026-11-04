@@ -38,11 +38,21 @@ def _entry_for(rel_path: str, project_root: Path, commands: list[dict]) -> dict:
     raise CompileValidationError(f"no compile command for {rel_path!r}; is it a C++ source file in this project?")
 
 
+def _makefile_object_target(output: str, build_dir: Path) -> str:
+    """Unix Makefiles exposes `<rel>.o` at the top Makefile, not `CMakeFiles/<tgt>.dir/<rel>.o`."""
+    normalized = output.strip().replace("\\", "/")
+    if (build_dir / "Makefile").is_file() and normalized.startswith("CMakeFiles/"):
+        parts = normalized.split("/", 2)
+        if len(parts) == 3 and parts[1].endswith(".dir") and parts[2]:
+            return parts[2]
+    return output.strip()
+
+
 def _compile_argv(entry: dict, build_dir: Path) -> list[str]:
     output = entry.get("output")
     if isinstance(output, str) and output.strip():
-        # Native cmake object target (e.g. CMakeFiles/agent_client.dir/src/Foo.cpp.o).
-        return ["cmake", "--build", str(build_dir), "--target", output, "--", "-j", "1"]
+        target = _makefile_object_target(output, build_dir)
+        return ["cmake", "--build", str(build_dir), "--target", target, "--", "-j", "1"]
     arguments = entry.get("arguments")
     if isinstance(arguments, list) and arguments and all(isinstance(a, str) for a in arguments):
         return arguments

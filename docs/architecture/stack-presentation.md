@@ -245,7 +245,7 @@ la [roadmap](../roadmap.md).
 |---|---|---|
 | Presets sanitizers (ASan/UBSan/TSan), couverture | Le modèle ne peut pas prouver l'absence d'UB qu'il annonce | Dépend de `CMakePresets.json` du projet cible |
 | `run_binary` avec arguments contrôlés | Impossible de reproduire un bug d'exécution hors de `ctest` | Sensible même avec cgroups |
-| Écriture / patch (`apply_patch`, `write_file`) | L'assistant propose un diff, l'humain l'applique | Montage `:ro`. La politique d'écriture (qui, où, quelle relecture) n'est pas tranchée |
+| Écriture libre (`write_file`, shell) | Pas d'écriture hors d'un extrait exact | Livré autrement : `patch` (`begin_plan`, `edit`, `apply`), sans commit |
 | Docs hors-ligne (cppreference, docs CMake) | Réponses de mémoire sur les API standard | Dump statique + collection Qdrant |
 | Accès web / `fetch_url` | Aucun | Choix : rester hors ligne |
 
@@ -292,11 +292,11 @@ Prometheus/Grafana.
 - `LLM_THREADS` / `LLM_NUMA` + cgroups `tools` : **livrés**.
 - Images pinnées par tag, pas encore par digest `@sha256`.
 - Hot-swap d'un GGUF de chat : livré (`LLM_ROUTER=1`, un seul modèle chargé, sélecteur sur `/ui`).
-- `llm` (`127.0.0.1:8080`), la page (`127.0.0.1:8090`) et MCP (`127.0.0.1:8092`) sont joignables depuis l'hôte, en loopback seulement. L'embedder et Qdrant restent internes.
+- La page (`127.0.0.1:8090`) et MCP (`127.0.0.1:8092`) sont en loopback. Le conteneur `llm` aussi (`127.0.0.1:8080`), sauf sur `evo-x5` où le processus hôte écoute `0.0.0.0:8080`. L'embedder et Qdrant restent internes.
 
 Ce qui reste, une fois le premier cercle livré. Le retrieval bloque la
-qualité des réponses. L'écriture n'est pas décidée. L'exploitation peut
-avancer à côté.
+qualité des réponses. L'écriture livrée est `patch` (`edit` puis
+`apply`, sans commit). L'exploitation peut avancer à côté.
 
 ```mermaid
 flowchart LR

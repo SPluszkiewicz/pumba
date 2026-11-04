@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+import product
 import workspaces as registry
 
 
@@ -108,8 +109,34 @@ def test_mcp_file_gains_the_workspace_header(tmp_path) -> None:
     folder.mkdir()
     registry.install_vscode_mcp(folder, "D:/svn/ticket-a")
     body = json.loads((folder / ".vscode" / "mcp.json").read_text(encoding="utf-8"))
-    assert body["servers"]["local-llm"]["headers"]["X-Workspace"] == "D:/svn/ticket-a"
+    assert body["servers"][product.MCP_SERVER]["headers"]["X-Workspace"] == "D:/svn/ticket-a"
 
     registry.install_vscode_mcp(folder, "D:/svn/ticket-a")
     again = json.loads((folder / ".vscode" / "mcp.json").read_text(encoding="utf-8"))
     assert again == body
+
+
+def test_mcp_file_renames_legacy_local_llm_server(tmp_path) -> None:
+    folder = tmp_path / "proj"
+    vscode = folder / ".vscode"
+    vscode.mkdir(parents=True)
+    (vscode / "mcp.json").write_text(
+        json.dumps(
+            {
+                "servers": {
+                    product.MCP_LEGACY[0]: {
+                        "type": "http",
+                        "url": "http://127.0.0.1:8092/mcp",
+                        "headers": {"X-Workspace": "D:/svn/old"},
+                    }
+                }
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    registry.install_vscode_mcp(folder, "D:/svn/ticket-a")
+    body = json.loads((vscode / "mcp.json").read_text(encoding="utf-8"))
+    assert product.MCP_LEGACY[0] not in body["servers"]
+    assert body["servers"][product.MCP_SERVER]["headers"]["X-Workspace"] == "D:/svn/ticket-a"

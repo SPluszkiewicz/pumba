@@ -19,6 +19,7 @@ import os
 from typing import List, Optional, Sequence
 
 import httpx
+from common.qdrant_schema import DOCUMENT_PREFIX, QUERY_PREFIX
 from openai import APIError, OpenAI
 
 DEFAULT_BASE_URL = "http://embedder:8081"
@@ -32,8 +33,8 @@ MAX_RETRIES = int(os.environ.get("INDEXER_EMBEDDER_MAX_RETRIES", "2"))
 EMBED_BATCH = int(os.environ.get("INDEXER_EMBED_BATCH", "16"))
 EMBEDDING_MODEL = "nomic-embed-text-v1.5"
 
-SEARCH_DOCUMENT_PREFIX = "search_document: "
-SEARCH_QUERY_PREFIX = "search_query: "  # not used here; documented for completeness
+SEARCH_DOCUMENT_PREFIX = DOCUMENT_PREFIX
+SEARCH_QUERY_PREFIX = QUERY_PREFIX  # not used here; documented for completeness
 
 
 class EmbedderError(RuntimeError):

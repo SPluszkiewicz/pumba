@@ -11,6 +11,9 @@
 # it turns out the installed podman-compose provider wants different
 # syntax, this is the one line to fix.
 
+# Must match COMPOSE_PROJECT in services/common/product.py.
+name: pumba
+
 networks:
   client-net:
     internal: true
@@ -19,8 +22,8 @@ networks:
   tools-net:
     internal: true
   # Not internal, so the engine will bind the host port. Outbound stays
-  # closed by the runtime overlay: compose.docker.yaml (masquerade off) or
-  # compose.podman.yaml (no default route). Podman rejects the Docker option.
+  # closed by the runtime overlay: config/compose/docker.yaml (masquerade off) or
+  # config/compose/podman.yaml (no default route). Podman rejects the Docker option.
   publish-net: {}
 
 volumes:
@@ -169,6 +172,7 @@ services:
       - QDRANT_URL=${QDRANT_URL}
       - QDRANT_COLLECTION=${QDRANT_COLLECTION}
       - INDEXER_SOURCE_ROOT=${INDEXER_SOURCE_ROOT}
+      - INDEXER_CHECKOUT_ID=${INDEXER_CHECKOUT_ID:-default}
     security_opt: ["no-new-privileges:true"]
     cap_drop: ["ALL"]
     profiles: ["index"]

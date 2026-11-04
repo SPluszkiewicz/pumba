@@ -15,7 +15,7 @@ HTTP call mocked/stubbed.
 
 GitHub Actions job `unit` (`.github/workflows/ci.yml`) runs the same pytest
 suites on every pull request: `python -m pytest -q --ignore=tests/integration`.
-It installs `pytest-asyncio` because `pytest.ini` sets `asyncio_mode = auto`.
+It installs `pytest-asyncio` because `pyproject.toml` sets `asyncio_mode = "auto"`.
 The RTX 6000 profile campaign is not part of that job.
 
 Run all of them at once:
@@ -83,12 +83,18 @@ hits `POST /chat` for scripts.
 `state/profile-campaign.json`. Questions and pass rules are in
 [Scénarios RTX 6000](rtx6000-scenarios.md). GitHub Actions does not run it.
 
-## EVO-X5 agent comparison
+## EVO-X5 host serve
 
-`python scripts/host/agent_compare.py plan` prints the matrix for the
-GMKtec EVO-X5 Pro. `prepare`, `score`, and `decide` are in
-[Comparaison d'agents](evo-x5-agent-compare.md). GitHub Actions does not
-run the campaign. The unit tests cover the scorer only.
+`tests/scripts/test_evo_x5_serve.py` checks the `llama-server` command
+for the GMKtec EVO-X5 Pro. It does not start the binary. Deploy steps
+are in [Déployer sur l'EVO-X5](evo-x5.md). GitHub Actions does not boot
+that machine.
+
+## Functional check suite (`python scripts/deploy.py check`)
+
+Runs `scripts/host/functional_check.py` against the live stack (`lookup`,
+`check`, `outline`, `calls`, `types`, cited `/chat`, and `/chat/stream`
+SSE) — see [Tests fonctionnels](prompt-tests-fonctionnels.md).
 
 ## Tool-calling evaluation (`scripts/container/eval_tools.py`)
 

@@ -33,7 +33,7 @@ list. The conversation id is not part of that text. Paste each result unchanged.
 Reading a file, searching text, and SVN status are not tools here. Use the
 Filesystem or Git MCP server, and a read-only [svn-mcp](https://github.com/WillBrock/svn-mcp/).
 The local model on `127.0.0.1:8080` is documented in
-[Using VS Code](../guides/vscode.md).
+[VS Code et Continue.dev](../guides/vscode.md).
 
 ## From the host
 
@@ -49,7 +49,7 @@ VS Code (`.vscode/mcp.json` in this repo):
 ```json
 {
   "servers": {
-    "local-llm": {
+    "pumba": {
       "type": "http",
       "url": "http://127.0.0.1:8092/mcp",
       "headers": {
@@ -61,11 +61,11 @@ VS Code (`.vscode/mcp.json` in this repo):
 ```
 
 `python scripts/deploy.py workspace <checkout>` writes that header when
-`.vscode/mcp.json` is missing, and sets it on an existing `local-llm`
+`.vscode/mcp.json` is missing, and sets it on an existing `pumba`
 server. The header selects the checkout. Without it, `ask` uses the
 default tree (`CODEBASE_PATH`, usually `sample/`).
 
-Open Copilot Chat, pick the `local-llm` tools, and call `ask`. The token
+Open Copilot Chat, pick the `pumba` tools, and call `ask`. The token
 stays inside the `mcp` container; the editor does not send
 `AGENT_BEARER_TOKEN`.
 
@@ -78,7 +78,7 @@ Cursor (`mcp.json`):
 ```json
 {
   "mcpServers": {
-    "local-llm": {
+    "pumba": {
       "url": "http://127.0.0.1:8092/mcp",
       "headers": {
         "X-Workspace": "D:/svn/ticket-142"
@@ -91,7 +91,7 @@ Cursor (`mcp.json`):
 Claude Code:
 
 ```bash
-claude mcp add --transport http local-llm http://127.0.0.1:8092/mcp
+claude mcp add --transport http pumba http://127.0.0.1:8092/mcp
 ```
 
 On Windows + WSL2, the publish is inside the WSL distro. If the IDE runs on

@@ -6,16 +6,35 @@ of the real client's behavior (upsert-by-id overwrites, collection_exists)
 to prove the idempotency and payload-schema guarantees.
 """
 
-import sys
-from pathlib import Path
 from types import SimpleNamespace
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "services" / "indexer"))
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "services"))
 
 import pytest
 from chunker import Chunk
-from vector_store import VectorStore, point_id
+from vector_store import IndexSnapshot, VectorStore, point_id
+
+
+def _payload_matches(payload: dict, scroll_filter) -> bool:
+    if scroll_filter is None:
+        return True
+    for cond in getattr(scroll_filter, "must", None) or []:
+        key = cond.key
+        match = cond.match
+        got = payload.get(key)
+        wanted_any = getattr(match, "any", None)
+        if wanted_any is not None:
+            if isinstance(got, list):
+                if not any(item in got for item in wanted_any):
+                    return False
+            elif got not in wanted_any:
+                return False
+            continue
+        value = getattr(match, "value", None)
+        if isinstance(got, list):
+            if value not in got:
+                return False
+        elif got != value:
+            return False
+    return True
 
 
 def _collection_info(schema: str):
@@ -37,6 +56,9 @@ class _FakeQdrantClient:
         self.schema = schema
         self.create_collection_calls = []
         self.deleted: list[str] = []
+        self.scroll_calls: list[dict] = []
+        self.set_payload_calls: list[list] = []
+        self.indexes: list[str] = []
 
     def collection_exists(self, collection_name):
         return collection_name in self._collections
@@ -65,14 +87,38 @@ class _FakeQdrantClient:
             # Real Qdrant upserts by ID: same ID replaces the prior point.
             self.points[point.id] = point
 
-    def scroll(self, collection_name, limit=256, offset=None, with_payload=None, with_vectors=False):
-        records = list(self.points.values())
+    def create_payload_index(self, collection_name, field_name, field_schema=None, **kwargs):
+        self.indexes.append(field_name)
+
+    def set_payload(self, collection_name, payload, points):
+        self.set_payload_calls.append(list(points))
+        for pid in points:
+            if pid in self.points:
+                self.points[pid].payload.update(payload)
+
+    def scroll(
+        self,
+        collection_name,
+        limit=256,
+        offset=None,
+        with_payload=None,
+        with_vectors=False,
+        scroll_filter=None,
+    ):
+        records = [point for point in self.points.values() if _payload_matches(point.payload or {}, scroll_filter)]
         start = 0 if offset is None else int(offset)
         page = records[start : start + limit]
         next_offset = start + limit if start + limit < len(records) else None
+        self.scroll_calls.append(
+            {"filter": scroll_filter, "limit": limit, "returned": len(page), "unfiltered": len(self.points)}
+        )
         return page, next_offset
 
     def delete(self, collection_name, points_selector):
+        if isinstance(points_selector, list):
+            for pid in points_selector:
+                self.points.pop(pid, None)
+            return
         wanted = set(points_selector.must[0].match.any)
         self.points = {pid: pt for pid, pt in self.points.items() if pt.payload.get("file_path") not in wanted}
 
@@ -98,10 +144,11 @@ class TestPointId:
         assert a == b
 
     def test_differs_when_any_field_changes(self):
-        base = point_id("src/widget.cpp", "Widget::size", 10)
-        assert base != point_id("src/other.cpp", "Widget::size", 10)
-        assert base != point_id("src/widget.cpp", "Widget::other", 10)
-        assert base != point_id("src/widget.cpp", "Widget::size", 11)
+        base = point_id("src/widget.cpp", "Widget::size", 10, "deadbeef")
+        assert base != point_id("src/other.cpp", "Widget::size", 10, "deadbeef")
+        assert base != point_id("src/widget.cpp", "Widget::other", 10, "deadbeef")
+        assert base != point_id("src/widget.cpp", "Widget::size", 11, "deadbeef")
+        assert base != point_id("src/widget.cpp", "Widget::size", 10, "cafebabe")
 
     def test_is_a_valid_uuid_string(self):
         import uuid
@@ -162,18 +209,35 @@ class TestUpsertIdempotency:
 
         assert len(fake.points) == 1
 
-    def test_reindexing_with_changed_text_still_upserts_in_place(self):
+    def test_divergent_blob_hashes_coexist_across_checkouts(self):
         fake = _FakeQdrantClient(existing_collections={"code_chunks"})
-        store = VectorStore(client=fake, collection="code_chunks")
+        store_a = VectorStore(client=fake, collection="code_chunks", checkout_id="co_a")
+        store_b = VectorStore(client=fake, collection="code_chunks", checkout_id="co_b")
         vector = [0.1] * 768
 
-        store.upsert_chunks([_make_chunk(text="old body")], [vector])
-        store.upsert_chunks([_make_chunk(text="new body", git_blob_hash="newhash")], [vector])
+        store_a.upsert_chunks([_make_chunk(text="old body", git_blob_hash="hash_a")], [vector])
+        store_b.upsert_chunks([_make_chunk(text="new body", git_blob_hash="hash_b")], [vector])
 
+        assert len(fake.points) == 2
+        assert store_a.listed_file_hashes() == {"src/widget.cpp": "hash_a"}
+        assert store_b.listed_file_hashes() == {"src/widget.cpp": "hash_b"}
+
+    def test_shared_blob_attaches_second_checkout_without_reembedding(self):
+        fake = _FakeQdrantClient(existing_collections={"code_chunks"})
+        store_a = VectorStore(client=fake, collection="code_chunks", checkout_id="co_a")
+        store_b = VectorStore(client=fake, collection="code_chunks", checkout_id="co_b")
+        vector = [0.1] * 768
+
+        store_a.upsert_chunks([_make_chunk(git_blob_hash="same_hash")], [vector])
+        assert store_b.attach_checkout("src/widget.cpp", "same_hash") == 1
         assert len(fake.points) == 1
         (only_point,) = fake.points.values()
-        assert only_point.payload["text"] == "new body"
-        assert only_point.payload["git_blob_hash"] == "newhash"
+        assert only_point.payload["checkouts"] == ["co_a", "co_b"]
+        assert store_b.listed_file_hashes() == {"src/widget.cpp": "same_hash"}
+        # Deleting from checkout A keeps the point alive for checkout B.
+        store_a.delete_by_file_paths(["src/widget.cpp"])
+        assert len(fake.points) == 1
+        assert only_point.payload["checkouts"] == ["co_b"]
 
     def test_different_symbols_produce_different_points(self):
         fake = _FakeQdrantClient(existing_collections={"code_chunks"})
@@ -206,7 +270,9 @@ class TestPayloadSchema:
             "language",
             "git_blob_hash",
             "text",
+            "checkouts",
         }
+        assert only_point.payload["checkouts"] == ["default"]
         assert only_point.payload["file_path"] == chunk.file_path
         assert only_point.payload["symbol_name"] == chunk.symbol_name
         assert only_point.payload["start_line"] == chunk.start_line
@@ -279,6 +345,87 @@ class TestListedFileHashesAndDelete:
         fake = _FakeQdrantClient(existing_collections={"code_chunks"})
         store = VectorStore(client=fake, collection="code_chunks")
         assert store.delete_by_file_paths([]) == 0
+
+
+class TestAttachAndDeleteCost:
+    """The blob-hash checkout path must not rescan the collection per file."""
+
+    def test_single_attach_uses_a_payload_filter(self):
+        fake = _FakeQdrantClient(existing_collections={"code_chunks"})
+        store_a = VectorStore(client=fake, collection="code_chunks", checkout_id="co_a")
+        store_b = VectorStore(client=fake, collection="code_chunks", checkout_id="co_b")
+        vector = [0.1] * 768
+        for i in range(20):
+            store_a.upsert_chunks(
+                [_make_chunk(file_path=f"src/f{i}.cpp", symbol_name="n", git_blob_hash=f"h{i}")],
+                [vector],
+            )
+        fake.scroll_calls.clear()
+        assert store_b.attach_checkout("src/f0.cpp", "h0") == 1
+        assert len(fake.scroll_calls) == 1
+        assert fake.scroll_calls[0]["filter"] is not None
+        assert fake.scroll_calls[0]["returned"] == 1
+        assert fake.scroll_calls[0]["unfiltered"] == 20
+        (target,) = [
+            point for point in fake.points.values() if point.payload["file_path"] == "src/f0.cpp"
+        ]
+        assert target.payload["checkouts"] == ["co_a", "co_b"]
+
+    def test_many_attaches_scroll_the_collection_once(self):
+        fake = _FakeQdrantClient(existing_collections={"code_chunks"})
+        store_a = VectorStore(client=fake, collection="code_chunks", checkout_id="co_a")
+        store_b = VectorStore(client=fake, collection="code_chunks", checkout_id="co_b")
+        vector = [0.1] * 768
+        pairs = [(f"src/f{i}.cpp", f"h{i}") for i in range(20)]
+        for path, blob in pairs:
+            store_a.upsert_chunks(
+                [_make_chunk(file_path=path, symbol_name="n", git_blob_hash=blob)],
+                [vector],
+            )
+        fake.scroll_calls.clear()
+        fake.set_payload_calls.clear()
+        assert store_b.attach_checkouts(pairs) == 20
+        assert len(fake.scroll_calls) == 1
+        assert fake.scroll_calls[0]["filter"] is None
+        assert len(fake.set_payload_calls) == 1
+        assert len(fake.set_payload_calls[0]) == 20
+
+    def test_snapshot_attach_does_not_scroll_again(self):
+        fake = _FakeQdrantClient(existing_collections={"code_chunks"})
+        store_a = VectorStore(client=fake, collection="code_chunks", checkout_id="co_a")
+        store_b = VectorStore(client=fake, collection="code_chunks", checkout_id="co_b")
+        vector = [0.1] * 768
+        store_a.upsert_chunks([_make_chunk(git_blob_hash="same")], [vector])
+        snap = store_b.snapshot()
+        fake.scroll_calls.clear()
+        fake.set_payload_calls.clear()
+        assert store_b.attach_checkouts([("src/widget.cpp", "same")], snapshot=snap) == 1
+        assert fake.scroll_calls == []
+        assert fake.set_payload_calls == [
+            [point_id("src/widget.cpp", "Widget::size", 10, "same")]
+        ]
+
+    def test_delete_uses_a_payload_filter(self):
+        fake = _FakeQdrantClient(existing_collections={"code_chunks"})
+        store = VectorStore(client=fake, collection="code_chunks")
+        vector = [0.1] * 768
+        store.upsert_chunks(
+            [
+                _make_chunk(symbol_name="a"),
+                _make_chunk(file_path="src/keep.cpp", symbol_name="c", git_blob_hash="x"),
+            ],
+            [vector, vector],
+        )
+        fake.scroll_calls.clear()
+        store.delete_by_file_paths(["src/widget.cpp"])
+        assert len(fake.scroll_calls) == 1
+        assert fake.scroll_calls[0]["filter"] is not None
+        assert fake.scroll_calls[0]["returned"] == 1
+
+    def test_ensure_collection_creates_payload_indexes(self):
+        fake = _FakeQdrantClient(existing_collections=set())
+        VectorStore(client=fake, collection="code_chunks").ensure_collection()
+        assert set(fake.indexes) == {"file_path", "git_blob_hash", "checkouts"}
 
 
 class TestEnvDefaults:

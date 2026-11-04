@@ -2,9 +2,9 @@
 """Serve Mistral Small 4 on the GMKtec EVO-X5 Pro.
 
 The CUDA image in this repo never sees the Radeon 8065S. llama-server runs
-on the host, Vulkan, loopback only. The campaign scorer accepts this backend
-and rejects ROCm: a second backend would move the minutes without moving
-the agent.
+on the host, Vulkan, on every interface of this machine so the agent
+container can call it. The page and MCP stay on 127.0.0.1.
+`--backend rocm` prints a probe and `--run` refuses it.
 
     python scripts/host/evo_x5_serve.py
     python scripts/host/evo_x5_serve.py --reasoning high
@@ -12,7 +12,7 @@ the agent.
 
 `--run` needs `llama-server` on PATH and the three Q5 shards under `models/`.
 Without `--run` the command is only printed. P-MODE on the chassis stays on
-Performance; Silent and Balanced void the timed runs.
+Performance (120 W). Silent and Balanced drop the sustained clocks.
 """
 
 from __future__ import annotations
@@ -30,10 +30,8 @@ PROFILE = REPO_ROOT / "config" / "profiles" / "evo-x5.env"
 ALIAS = "mistral-small-4"
 # Physical cores of the Ryzen AI Max+ PRO 495. Logical threads are the slow path.
 THREADS = "16"
-CONTEXT = "32768"
 
-# Campaign pair. High uses Mistral's 0.7; none stays at 0.1 so the API cells
-# can use the same number. The split is this pair, not a free temperature.
+# Mistral's pair for this model: none is 0.1, high is 0.7.
 TEMPERATURE = {"none": "0.1", "high": "0.7"}
 
 
@@ -74,11 +72,19 @@ def serve_env(backend: str) -> dict[str, str]:
     """ROCm on this APU sees the BIOS slice unless unified memory is enabled.
 
     Vulkan already adds the shared heap (about 176 Go on the 192 Go chassis).
-    The campaign does not use this env: `--backend rocm` is a probe, not a case.
+    This profile serves on Vulkan. `--backend rocm` is a probe.
     """
     if backend == "rocm":
         return {"GGML_CUDA_ENABLE_UNIFIED_MEMORY": "1"}
     return {}
+
+
+def context_tokens(profile: dict[str, str]) -> str:
+    """Trained window from the profile. The host server and the agent share it."""
+    raw = profile.get("LLM_CTX_SIZE", "")
+    if not raw.isdigit() or int(raw) < 1:
+        raise SystemExit("[evo-x5] LLM_CTX_SIZE manquant dans config/profiles/evo-x5.env")
+    return raw
 
 
 def serve_argv(
@@ -87,12 +93,12 @@ def serve_argv(
     *,
     reasoning: str,
     port: int,
+    context: str,
 ) -> list[str]:
     """Flags that keep every local run on the same window, cache, and threads.
 
     `--fit` is omitted on purpose. On this APU it spills experts onto the CPU
-    when the reported heap is only the BIOS reservation, and the minutes then
-    measure the spill.
+    when the reported heap is only the BIOS reservation.
     """
     if reasoning not in TEMPERATURE:
         raise SystemExit(f"[evo-x5] reasoning must be none or high, not {reasoning!r}")
@@ -103,7 +109,7 @@ def serve_argv(
         "--alias",
         ALIAS,
         "--host",
-        "127.0.0.1",
+        "0.0.0.0",
         "--port",
         str(port),
         "--jinja",
@@ -116,7 +122,7 @@ def serve_argv(
         "-fa",
         "on",
         "-c",
-        CONTEXT,
+        context,
         "-t",
         THREADS,
         "-tb",
@@ -144,13 +150,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--run", action="store_true", help="exec llama-server; default is print only")
     args = parser.parse_args(argv)
 
-    weight = host_weight(profile_map(PROFILE)["LLM_MODEL_PATH"])
-    command = serve_argv(args.binary, weight, reasoning=args.reasoning, port=args.port)
+    profile = profile_map(PROFILE)
+    weight = host_weight(profile["LLM_MODEL_PATH"])
+    context = context_tokens(profile)
+    command = serve_argv(
+        args.binary,
+        weight,
+        reasoning=args.reasoning,
+        port=args.port,
+        context=context,
+    )
     env = serve_env(args.backend)
     print(format_invocation(command, env), flush=True)
     if args.backend != "vulkan":
         print(
-            "[evo-x5] ROCm n'est pas une case. Le score écarte backend != vulkan.",
+            "[evo-x5] Vulkan est le moteur de ce profil. --run avec ROCm s'arrête.",
             file=sys.stderr,
             flush=True,
         )

@@ -17,6 +17,7 @@ flowchart LR
   end
   subgraph sandbox ["tools-net"]
     tools["Build, clangd, git, svn"]
+    patch["Patch (edit / apply)"]
   end
   agent["Agent"]
   indexer["Indexer, one shot"]
@@ -28,14 +29,16 @@ flowchart LR
   agent --> reranker
   agent --> qdrant
   agent --> tools
+  agent --> patch
   indexer --> embedder
   indexer --> qdrant
 ```
 
-The serving path is `llm`, `embedder`, `reranker`, `qdrant`, `agent`,
-`tools`, `mcp`, and `ui-proxy` (the loopback door to the page). `indexer`
-is a one-shot job. `devtools` never runs in production. A plain-language
-walkthrough is [Comprendre sans bagage](../concepts/en-clair.md).
+The serving path is `llm` (or host `llama-server` on `evo-x5`), `embedder`,
+`reranker`, `qdrant`, `agent`, `tools`, `patch`, `mcp`, and `ui-proxy` (the
+loopback door to the page). `indexer` is a one-shot job. `devtools` never
+runs in production. A plain-language walkthrough is
+[Comprendre sans bagage](../concepts/en-clair.md).
 
 ## Each service, one paragraph each
 
@@ -60,22 +63,27 @@ hits down to 5. If the process is down, retrieval keeps the RRF order.
 **`qdrant`** is the vector database. The default collection, `code_chunks`,
 is the `CODEBASE_PATH` tree (`sample/` unless you change it). Each registered
 remote gets its own collection (`repo_<hash>` in `state/workspaces.json`).
-Two checkouts of the same remote URL share that collection. A point stores
-the embedding and a payload (file path, symbol name, line range, language,
-a content hash for idempotent re-indexing).
+Two checkouts of the same remote URL share that collection. A point is keyed
+by `(file_path, git_blob_hash, symbol_name, start_line)` and stores the
+embedding plus a payload (`file_path`, `symbol_name`, line range, `language`,
+`git_blob_hash`, and `checkouts` listing the working copies that hold that
+blob).
 
 **`indexer`** is a one-shot batch job (not a long-running server) that walks
-the C++ project, chunks it structurally with `tree-sitter` (functions/
-classes/methods, not naive line-splitting), embeds each chunk via `embedder`,
-and upserts into `qdrant`. See [The indexing pipeline](../concepts/indexing-pipeline.md).
+the C++ project, chunks it structurally with `tree-sitter` (functions,
+header declarations, classes, methods, plus CMake/Markdown/YAML/JSON/TOML),
+embeds each new blob via `embedder`, and upserts into `qdrant` (attaching
+unchanged blobs across branches without re-embedding). See
+[The indexing pipeline](../concepts/indexing-pipeline.md).
 
 **`agent`** is the orchestrator and the only service every other network
 segment can reach. A gate chooses `direct` (no index, no tools) or `code`.
-On `code` it retrieves from `qdrant`, overlays dirty files from the working
-copy, may paste a ranked signature map when the question is about the shape
-of the tree, calls `llm`, and runs a bounded tool loop (default 8 rounds,
-23 named tools). `/chat` is bearer-gated. The host page is `GET /ui`,
-reached through `ui-proxy` at `127.0.0.1:8090`. See
+On `code` it retrieves from `qdrant` (filtered by the active `checkout_id`),
+overlays dirty files from the working copy, may paste a ranked signature map
+when the question is about the shape of the tree, calls `llm`, and runs a
+bounded tool loop (default 48 rounds, 27 named tools). `/chat` is
+bearer-gated. The host page is `GET /ui`, reached through `ui-proxy` at
+`127.0.0.1:8090`. See
 [RAG, explained](../concepts/rag-explained.md) and
 [Tool calling](../concepts/tool-calling.md).
 
@@ -90,6 +98,11 @@ The highest-security-risk service, since an LLM decides when to call it. See
 [Adding a new tool](../guides/adding-a-new-tool.md) and
 [Security](security.md).
 
+**`patch`** is the only service whose checkout mount is read-write (`tools-net`,
+not published on the host). `begin_plan` scopes a campaign, `edit` validates an
+exact replacement and returns a unified diff without writing, and `apply`
+writes that working copy (no commit, no push).
+
 **`ui-proxy`** is nginx on `publish-net`. Docker Desktop does not publish a
 host port for a container that sits only on an internal network, so this
 proxy is the loopback forwarder to `agent:8090`. `llm` and `mcp` join
@@ -102,7 +115,9 @@ calculator with known bugs), not `app/`.
 **`docs`** serves this documentation site locally via `mkdocs` (`:8000`).
 Host publishes of the serving stack are loopback only: the page
 (`127.0.0.1:8090`), the chat model (`127.0.0.1:8080`), and MCP
-(`127.0.0.1:8092`).
+(`127.0.0.1:8092`). On `evo-x5` the chat model is the host process on
+`0.0.0.0:8080`; the page and MCP stay on loopback. See
+[Déployer sur l'EVO-X5](../guides/evo-x5.md).
 
 **`devtools`** is the single toolchain image (C++ compiler, CMake, linters,
 Python, every service's dependencies) used for the `.devcontainer`

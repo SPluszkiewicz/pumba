@@ -1,7 +1,9 @@
 # Tooling configuration only - this repository is not a single installable
 # Python package (each service under services/ ships its own requirements.txt
-# and is built into its own container). ruff/mypy read this file; pytest reads
-# pytest.ini.
+# and is built into its own container). ruff, mypy, and pytest read this file.
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
 
 [tool.ruff]
 line-length = 120
@@ -24,7 +26,19 @@ ignore = [
 "tests/**" = ["E402"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["services", "deploy", "eval_rag", "eval_tools", "fetch_models", "install_deps", "fix_permissions"]
+known-first-party = [
+    "services",
+    "deploy",
+    "eval_rag",
+    "eval_tools",
+    "fetch_models",
+    "install_deps",
+    "fix_permissions",
+    "product",
+    "repo",
+    "workspaces",
+    "export_repo",
+]
 
 [tool.mypy]
 python_version = "3.11"

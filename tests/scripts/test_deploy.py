@@ -2,9 +2,9 @@
 
 `_run`/`subprocess.run`/`shutil.which` are always monkeypatched out - these
 tests never invoke a real `podman` binary. What's under test is the command
-sequencing and the safety checks (env file / placeholder token / health
-polling timeout), which is exactly the value this script adds over typing
-the raw `podman compose` commands by hand.
+sequencing and the safety checks (env file / token / health polling), which
+is exactly the value this script adds over typing the raw `podman compose`
+commands by hand.
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ from types import SimpleNamespace
 import pytest
 
 import deploy
+import product
 
 # --------------------------------------------------------------------------- _require_podman
 
@@ -47,27 +48,38 @@ def test_require_podman_passes_when_available(monkeypatch):
 
 # --------------------------------------------------------------------------- _ensure_env_file
 
-def test_ensure_env_file_creates_from_example_and_exits(tmp_path, monkeypatch):
+def test_ensure_env_file_creates_from_example_and_fills_token(tmp_path, monkeypatch):
     example = tmp_path / ".env.example"
-    example.write_text("AGENT_BEARER_TOKEN=changeme-generate-a-real-secret\n", encoding="utf-8")
+    example.write_text(
+        "AGENT_BEARER_TOKEN=changeme-generate-a-real-secret\nLLM_PORT=8080\n",
+        encoding="utf-8",
+    )
     env = tmp_path / ".env"
     monkeypatch.setattr(deploy, "ENV_FILE", env)
     monkeypatch.setattr(deploy, "ENV_EXAMPLE", example)
 
-    with pytest.raises(SystemExit):
-        deploy._ensure_env_file()
+    deploy._ensure_env_file()
 
-    assert env.exists()
-    assert env.read_text(encoding="utf-8") == example.read_text(encoding="utf-8")
+    text = env.read_text(encoding="utf-8")
+    assert "changeme-generate-a-real-secret" not in text
+    assert "LLM_PORT=8080" in text
+    token = next(
+        line.split("=", 1)[1] for line in text.splitlines() if line.startswith("AGENT_BEARER_TOKEN=")
+    )
+    assert len(token) >= 32
 
 
-def test_ensure_env_file_rejects_placeholder_token(tmp_path, monkeypatch):
+def test_ensure_env_file_replaces_placeholder_token(tmp_path, monkeypatch):
     env = tmp_path / ".env"
     env.write_text("AGENT_BEARER_TOKEN=changeme-generate-a-real-secret\n", encoding="utf-8")
     monkeypatch.setattr(deploy, "ENV_FILE", env)
 
-    with pytest.raises(SystemExit):
-        deploy._ensure_env_file()
+    deploy._ensure_env_file()
+
+    text = env.read_text(encoding="utf-8")
+    assert "changeme-generate-a-real-secret" not in text
+    token = text.split("=", 1)[1].strip()
+    assert len(token) >= 32
 
 
 def test_ensure_env_file_passes_with_real_token(tmp_path, monkeypatch):
@@ -75,14 +87,16 @@ def test_ensure_env_file_passes_with_real_token(tmp_path, monkeypatch):
     env.write_text("AGENT_BEARER_TOKEN=a-real-random-secret-value\n", encoding="utf-8")
     monkeypatch.setattr(deploy, "ENV_FILE", env)
 
-    deploy._ensure_env_file()  # must not raise
+    deploy._ensure_env_file()
+    deploy._ensure_env_file()
+    assert env.read_text(encoding="utf-8") == "AGENT_BEARER_TOKEN=a-real-random-secret-value\n"
 
 
 # --------------------------------------------------------------------------- _wait_healthy
 
 def test_wait_healthy_returns_once_all_services_report_healthy(monkeypatch):
     monkeypatch.setattr(deploy.time, "sleep", lambda _s: None)
-    ps_output = "\n".join(f"local_llm-{svc}-1  Up 2 minutes (healthy)" for svc in ["qdrant", "agent"])
+    ps_output = "\n".join(f"{product.COMPOSE_PROJECT}-{svc}-1  Up 2 minutes (healthy)" for svc in ["qdrant", "agent"])
     monkeypatch.setattr(
         subprocess, "run", lambda *a, **k: SimpleNamespace(stdout=ps_output, returncode=0)
     )
@@ -123,7 +137,7 @@ def test_cmd_up_full_sequence(monkeypatch, _no_real_podman):
     monkeypatch.setattr(deploy, "_ensure_env_file", lambda: None)
     monkeypatch.setattr(deploy, "_wait_healthy", lambda *a, **k: None)
     monkeypatch.setattr(deploy, "_prepare_gpu_for_up", lambda _env: None)
-    monkeypatch.setattr(deploy, "_compose_build_and_up", lambda: calls.append(["build_and_up"]))
+    monkeypatch.setattr(deploy, "_compose_build_and_up", lambda host=False: calls.append(["build_and_up"]))
 
     deploy.cmd_up(argparse.Namespace(skip_models=False, skip_index=False, timeout=300))
 
@@ -137,7 +151,7 @@ def test_cmd_up_respects_skip_flags(monkeypatch, _no_real_podman):
     monkeypatch.setattr(deploy, "_ensure_env_file", lambda: None)
     monkeypatch.setattr(deploy, "_wait_healthy", lambda *a, **k: None)
     monkeypatch.setattr(deploy, "_prepare_gpu_for_up", lambda _env: None)
-    monkeypatch.setattr(deploy, "_compose_build_and_up", lambda: calls.append(["build_and_up"]))
+    monkeypatch.setattr(deploy, "_compose_build_and_up", lambda host=False: calls.append(["build_and_up"]))
 
     deploy.cmd_up(argparse.Namespace(skip_models=True, skip_index=True, timeout=300))
 
@@ -145,6 +159,28 @@ def test_cmd_up_respects_skip_flags(monkeypatch, _no_real_podman):
     assert not any("fetch-models" in c for c in joined)
     assert not any("indexer" in c for c in joined)
     assert "build_and_up" in joined
+
+
+def test_host_profile_up_skips_the_llm_container(monkeypatch, _no_real_podman, tmp_path):
+    calls = _recorder(monkeypatch)
+    env_file = tmp_path / ".env"
+    env_file.write_text("LLM_SERVE=host\nLLM_GPU_ARG=0\n", encoding="utf-8")
+    monkeypatch.setattr(deploy, "ENV_FILE", env_file)
+    monkeypatch.setattr(deploy, "_ensure_env_file", lambda: None)
+    monkeypatch.setattr(deploy, "_require_bind_source", lambda: None)
+    monkeypatch.setattr(deploy, "_prepare_gpu_for_up", lambda _env: None)
+    monkeypatch.setattr(deploy, "_wait_healthy", lambda *a, **k: None)
+    monkeypatch.setattr(deploy, "_require_host_llm_weights", lambda: None)
+    monkeypatch.setattr(deploy, "_start_host_llm", lambda **_k: calls.append(["host-llm"]))
+
+    deploy.cmd_up(argparse.Namespace(skip_models=True, skip_index=True, timeout=5))
+
+    assert ["host-llm"] in calls
+    up = next(cmd for cmd in calls if "up" in cmd)
+    assert "--no-deps" in up
+    assert "llm" not in up
+    assert "patch" in up
+    assert "agent" in up
 
 
 def test_cmd_status(monkeypatch, _no_real_podman):
@@ -157,7 +193,7 @@ def test_cmd_index(monkeypatch, _no_real_podman):
     calls = _recorder(monkeypatch)
     deploy.cmd_index(argparse.Namespace())
     assert calls == [
-        ["podman", "compose", "up", "-d", "--force-recreate", "--no-deps", "tools", "agent", "ui-proxy"],
+        ["podman", "compose", "up", "-d", "--force-recreate", "--no-deps", "tools", "patch", "agent", "ui-proxy"],
         ["podman", "compose", "--profile", "index", "run", "--rm", "indexer"],
     ]
 
@@ -296,10 +332,12 @@ def test_compose_env_normalizes_codebase_path_from_env_file(tmp_path, monkeypatc
     monkeypatch.setattr(deploy, "_host_os", lambda: "nt")
     monkeypatch.setattr(deploy, "_RUNTIME", "podman")
     monkeypatch.setenv("CODEBASE_PATH", "should-be-overridden")
+    monkeypatch.delenv("COMPOSE_PROJECT_NAME", raising=False)
 
     result = deploy._compose_env()
 
     assert result["CODEBASE_PATH"] == "/mnt/d/svn/mon_projet"
+    assert result["COMPOSE_PROJECT_NAME"] == product.COMPOSE_PROJECT
 
 
 # --------------------------------------------------------------------------- GPU / CDI
@@ -312,9 +350,9 @@ def test_compose_cmd_without_cpu_override(monkeypatch):
         "-f",
         "compose.yaml",
         "-f",
-        "compose.podman.yaml",
+        "config/compose/podman.yaml",
         "-f",
-        "compose.workspaces.yaml",
+        "state/compose.workspaces.yaml",
         "build",
     ]
 
@@ -328,9 +366,9 @@ def test_compose_cmd_docker_layers_gpu_overlay(monkeypatch):
         "-f",
         "compose.yaml",
         "-f",
-        "compose.docker.yaml",
+        "config/compose/docker.yaml",
         "-f",
-        "compose.workspaces.yaml",
+        "state/compose.workspaces.yaml",
         "up",
         "-d",
     ]
@@ -345,11 +383,11 @@ def test_compose_cmd_docker_cpu_does_not_request_gpus(monkeypatch):
         "-f",
         "compose.yaml",
         "-f",
-        "compose.cpu.yaml",
+        "config/compose/cpu.yaml",
         "-f",
-        "compose.docker.cpu.yaml",
+        "config/compose/docker.cpu.yaml",
         "-f",
-        "compose.workspaces.yaml",
+        "state/compose.workspaces.yaml",
         "build",
     ]
 
@@ -401,11 +439,11 @@ def test_choose_runtime_explicit_docker_does_not_reexec():
 def test_wsl_reexec_command_targets_local_llm():
     cmd = deploy._wsl_reexec_command(
         ["up", "--skip-models"],
-        distro="local-llm",
-        repo="/mnt/d/rest/local_llm",
+        distro=deploy.WSL_DISTRO_DEFAULT,
+        repo="/mnt/d/rest/pumba",
     )
-    assert cmd[:4] == ["wsl", "-d", "local-llm", "-e"]
-    assert "cd /mnt/d/rest/local_llm && exec python3 scripts/deploy.py up --skip-models" in cmd[-1]
+    assert cmd[:4] == ["wsl", "-d", deploy.WSL_DISTRO_DEFAULT, "-e"]
+    assert "cd /mnt/d/rest/pumba && exec python3 scripts/deploy.py up --skip-models" in cmd[-1]
 
 
 def test_prepare_gpu_on_docker_does_not_probe_cdi(monkeypatch):
@@ -429,11 +467,11 @@ def test_compose_cmd_with_cpu_override(monkeypatch):
         "-f",
         "compose.yaml",
         "-f",
-        "compose.cpu.yaml",
+        "config/compose/cpu.yaml",
         "-f",
-        "compose.podman.yaml",
+        "config/compose/podman.yaml",
         "-f",
-        "compose.workspaces.yaml",
+        "state/compose.workspaces.yaml",
         "up",
         "-d",
         "llm",
@@ -485,7 +523,7 @@ def test_cmd_up_prepares_gpu_before_compose(monkeypatch, _no_real_podman):
     calls: list[str] = []
     monkeypatch.setattr(deploy, "_ensure_env_file", lambda: None)
     monkeypatch.setattr(deploy, "_wait_healthy", lambda *a, **k: None)
-    monkeypatch.setattr(deploy, "_compose_build_and_up", lambda: calls.append("build_and_up"))
+    monkeypatch.setattr(deploy, "_compose_build_and_up", lambda host=False: calls.append("build_and_up"))
     monkeypatch.setattr(
         deploy,
         "_prepare_gpu_for_up",
@@ -579,6 +617,11 @@ def test_gpu_profiles_cover_the_vram_and_model_cases():
     assert evo["LLM_SERVE"] == "host"
     assert evo["LLM_GPU_ARG"] == "0"
     assert evo["LLM_THREADS"] == "16"
+    assert evo["LLM_CTX_SIZE"] == "262144"
+    assert evo["AGENT_CONTEXT_BUDGET_TOKENS"] == "262144"
+    assert evo["LLM_BASE_URL"] == "http://host.containers.internal:8080"
+    assert deploy._parse_env_file(deploy.GPU_PROFILE_DIR / "16g.env")["LLM_BASE_URL"] == "http://llm:8080"
+    assert deploy._parse_env_file(deploy.GPU_PROFILE_DIR / "16g.env")["LLM_SERVE"] == "container"
     assert "00001-of-00003" in evo["LLM_MODEL_PATH"]
 
 
@@ -588,3 +631,130 @@ def test_codebase_path_exists_accepts_relative_repo_path(tmp_path, monkeypatch):
     monkeypatch.setattr(deploy, "REPO_ROOT", tmp_path)
 
     assert deploy._codebase_path_exists("./app")
+
+
+def test_needs_container_engine_skips_host_only_commands():
+    assert deploy._needs_container_engine(["export"]) is False
+    assert deploy._needs_container_engine(["gpu-profile", "evo-x5"]) is False
+    assert deploy._needs_container_engine(["-h"]) is False
+    assert deploy._needs_container_engine([]) is False
+    assert deploy._needs_container_engine(["up"]) is True
+    assert deploy._needs_container_engine(["fetch-extra", "evo-x5"]) is True
+
+
+def test_activate_runtime_skips_engine_for_export(monkeypatch):
+    probed = []
+    monkeypatch.setattr(deploy, "_engine_probe", lambda name: probed.append(name) or (False, "no"))
+    deploy._activate_runtime(["export"])
+    deploy._activate_runtime(["gpu-profile", "evo-x5"])
+    assert probed == []
+
+
+def test_activate_runtime_exits_when_wsl_distro_missing(monkeypatch):
+    monkeypatch.setattr(deploy, "_engine_probe", lambda _name: (False, "Cannot connect to Podman"))
+    monkeypatch.setattr(deploy, "choose_runtime", lambda *a, **k: ("podman", True))
+    monkeypatch.setattr(
+        deploy, "_wsl_distro_ready", lambda _d: (False, "The system cannot find the distribution")
+    )
+    monkeypatch.delenv("DEPLOY_SKIP_WSL", raising=False)
+    with pytest.raises(SystemExit, match="cannot be started"):
+        deploy._activate_runtime(["up"])
+
+
+def test_wsl_distro_ready_false_when_wsl_missing(monkeypatch):
+    monkeypatch.setattr(deploy.shutil, "which", lambda _n: None)
+    ok, detail = deploy._wsl_distro_ready("local-llm")
+    assert ok is False
+    assert "PATH" in detail
+
+
+def test_cmd_up_indexer_failure_leaves_stack_up(monkeypatch, _no_real_podman):
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **_k):
+        calls.append(cmd)
+        if "indexer" in cmd:
+            raise subprocess.CalledProcessError(1, cmd)
+
+    monkeypatch.setattr(deploy, "_run", fake_run)
+    monkeypatch.setattr(deploy, "_ensure_env_file", lambda: None)
+    monkeypatch.setattr(deploy, "_require_bind_source", lambda: None)
+    monkeypatch.setattr(deploy, "_wait_healthy", lambda *a, **k: None)
+    monkeypatch.setattr(deploy, "_prepare_gpu_for_up", lambda _env: None)
+    monkeypatch.setattr(deploy, "_compose_build_and_up", lambda host=False: calls.append(["build_and_up"]))
+
+    rc = deploy.cmd_up(argparse.Namespace(skip_models=True, skip_index=False, timeout=1))
+    assert rc == 1
+    assert ["build_and_up"] in calls
+
+
+def test_host_up_fetches_evo_weights_when_missing(monkeypatch, _no_real_podman, tmp_path):
+    calls = _recorder(monkeypatch)
+    env_file = tmp_path / ".env"
+    env_file.write_text("LLM_SERVE=host\n", encoding="utf-8")
+    monkeypatch.setattr(deploy, "ENV_FILE", env_file)
+    monkeypatch.setattr(deploy, "_ensure_env_file", lambda: None)
+    monkeypatch.setattr(deploy, "_require_bind_source", lambda: None)
+    monkeypatch.setattr(deploy, "_prepare_gpu_for_up", lambda _env: None)
+    monkeypatch.setattr(deploy, "_wait_healthy", lambda *a, **k: None)
+    monkeypatch.setattr(deploy, "_compose_build_and_up", lambda host=False: calls.append(["build_and_up"]))
+    monkeypatch.setattr(deploy, "_host_llm_weights_missing", lambda: [tmp_path / "missing.gguf"])
+    monkeypatch.setattr(deploy, "_require_host_llm_weights", lambda: None)
+    monkeypatch.setattr(deploy, "_start_host_llm", lambda **_k: calls.append(["host-llm"]))
+    fetched: list[str] = []
+    monkeypatch.setattr(deploy, "cmd_fetch_extra", lambda args: fetched.append(args.name) or 0)
+
+    deploy.cmd_up(argparse.Namespace(skip_models=False, skip_index=True, timeout=5))
+
+    assert fetched == ["evo-x5"]
+    assert ["host-llm"] in calls
+
+
+def test_wait_http_returns_when_ready(monkeypatch):
+    import urllib.request
+
+    class _Resp:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_a):
+            return False
+
+    monkeypatch.setattr(deploy.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *_a, **_k: _Resp())
+    deploy._wait_http("http://127.0.0.1:8080/health", timeout=5)
+
+
+def test_wait_http_exits_when_process_dies(monkeypatch):
+    monkeypatch.setattr(deploy.time, "sleep", lambda _s: None)
+    with pytest.raises(SystemExit, match="exited before"):
+        deploy._wait_http("http://127.0.0.1:8080/health", timeout=5, process=SimpleNamespace(poll=lambda: 1))
+
+
+def test_start_host_llm_waits_for_health(monkeypatch, tmp_path):
+    monkeypatch.setattr(deploy, "HOST_LLM_PID", tmp_path / "host-llm.pid")
+
+    class _Proc:
+        pid = 4242
+
+        def poll(self):
+            return None
+
+    monkeypatch.setattr(subprocess, "Popen", lambda *_a, **_k: _Proc())
+    waited: list[object] = []
+
+    def fake_wait(url, **k):
+        waited.append((url, k.get("timeout"), k.get("process") is not None))
+
+    monkeypatch.setattr(deploy, "_wait_http", fake_wait)
+    deploy._start_host_llm(timeout=12)
+    assert waited == [(deploy.HOST_LLM_HEALTH_URL, 12, True)]
+    assert (tmp_path / "host-llm.pid").read_text(encoding="utf-8") == "4242"
+
+
+def test_package_is_split_across_modules():
+    assert (deploy.REPO_ROOT / "scripts" / "host" / "deploy" / "stack.py").is_file()
+    assert (deploy.REPO_ROOT / "scripts" / "host" / "deploy" / "doctor.py").is_file()
+    assert not (deploy.REPO_ROOT / "scripts" / "host" / "deploy.py").exists()

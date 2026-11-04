@@ -14,9 +14,11 @@ succeeds.
 On this project's Windows setup, Podman is the WSL2 distro `local-llm`, not
 the Windows `podman` CLI. That CLI has no machine, so `podman compose version`
 from PowerShell fails with "Cannot connect to Podman". `python scripts/deploy.py up`
-from PowerShell sees that and continues the same command inside `local-llm`.
-You do not open WSL yourself first. Set `CONTAINER_RUNTIME=docker` when you
-want Docker Desktop instead.
+from PowerShell sees that and continues the same command inside `local-llm`
+after checking that distro starts (`wsl -d local-llm -e true`). If that
+distro is missing, deploy exits with the WSL error instead of looping. You
+do not open WSL yourself first. Set `CONTAINER_RUNTIME=docker` when you
+want Docker Desktop instead. Set `DEPLOY_WSL_DISTRO` to use another distro.
 
 Follow the [official Podman installation instructions](https://podman.io/docs/installation)
 if you are installing Podman on Linux or initializing a Podman machine. On
@@ -57,18 +59,19 @@ on `D:` is `/mnt/d` inside WSL, and that mount rejects chmod. Skip it here.
 
 If you have an NVIDIA GPU and want `llm` to run on it instead of the CPU
 fallback, see [Troubleshooting GPU](../guides/troubleshooting-gpu.md). Podman
-uses NVIDIA CDI. Docker uses `compose.docker.yaml` (`gpus: all`), which
+uses NVIDIA CDI. Docker uses `config/compose/docker.yaml` (`gpus: all`), which
 `deploy.py` adds when the runtime is Docker. The CPU fallback on Docker also
-adds `compose.docker.cpu.yaml` so the CDI devices are actually removed.
+adds `config/compose/docker.cpu.yaml` so the CDI devices are actually removed.
 
 Without a GPU, everything still works. `deploy.py up` falls back to
-`compose.cpu.yaml`.
+`config/compose/cpu.yaml`.
 
 ## Disk space
 
-Budget roughly 12 GB for weights: the chat model (Q5_K_M, ~9.8 GB), the embedding model
-(a few hundred MB), and container image layers (CUDA base images in
-particular are large).
+Budget roughly 12 GB for the default 14B weights (Q5_K_M, ~9.8 GB), the
+embedding model (a few hundred MB), and the container image layers. The
+`evo-x5` profile adds the Mistral Small 4 Q5, about 83 GB. See
+[Déployer sur l'EVO-X5](../guides/evo-x5.md).
 
 ## Next
 

@@ -1,6 +1,6 @@
-# Local LLM + C++/CMake Coding Assistant
+# Pumba
 
-A fully containerized, offline, retrieval-augmented coding assistant built
+Pumba is a fully containerized, offline, retrieval-augmented coding assistant built
 around a C++/CMake project. Every process - the chat model, the embedding
 model, the vector database, the orchestrator, and the sandboxed build/lint
 toolchain - runs in its own Podman container, wired together over network
@@ -50,6 +50,7 @@ and Qdrant stay unpublished. See
 - New to the ideas? [Comprendre sans bagage](concepts/en-clair.md), then [First run](getting-started/first-run.md).
 - Installing: [Prerequisites](getting-started/prerequisites.md).
 - Day to day, including a large checkout and the context meter: [Using the assistant](guides/using-the-assistant.md).
-- From an editor: [Using VS Code](guides/vscode.md).
+- From an editor: [VS Code et Continue.dev](guides/vscode.md).
+- GMKtec EVO-X5 Pro: [Déployer sur l'EVO-X5](guides/evo-x5.md).
 - Why a mechanism works: [RAG](concepts/rag-explained.md), [indexing](concepts/indexing-pipeline.md), [tool calling](concepts/tool-calling.md).
 - Exact request shapes: [Agent API](reference/agent-api.md), or `CONTRACTS.md` at the repo root.

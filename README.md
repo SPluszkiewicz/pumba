@@ -1,6 +1,6 @@
-# Local LLM + C++/CMake Coding Assistant
+# Pumba
 
-A fully containerized, offline, retrieval-augmented coding assistant built
+Pumba is a fully containerized, offline, retrieval-augmented coding assistant built
 around a C++/CMake project. Every process runs in its own Podman container:
 a local chat model and embedding model (`llama.cpp`), a vector database
 (`qdrant`) holding a structurally-chunked index of the codebase, a FastAPI
@@ -38,8 +38,10 @@ A virtualenv and a permissions pass are not part of this step. Cursor, Claude
 Code, and OpenCode can call the assistant at `http://127.0.0.1:8092/mcp`
 ([MCP](docs/reference/mcp.md)).
 
-`python scripts/deploy.py --help` lists the rest (`index`, `train`, `logs`,
-`test`, `doctor`, `down --volumes`).
+`python scripts/deploy.py --help` lists the rest (`workspace`, `gpu-profile`,
+`fetch-extra`, `check`, `index`, `train`, `logs`, `test`, `doctor`,
+`export`, `down --volumes`). `export` writes `pumba-export.zip` next to
+the repo: source and docs, without models, logs, `state/`, or virtualenvs.
 
 The steps above are also the raw Compose commands, if you want to run them
 yourself where the engine already works:
@@ -49,7 +51,7 @@ yourself where the engine already works:
 podman compose --profile setup run --rm fetch-models
 
 # 2. Build and start the core services
-podman compose up -d qdrant llm embedder tools agent mcp
+podman compose up -d qdrant llm embedder reranker tools patch agent ui-proxy mcp
 
 # 3. Index the codebase (one-shot job, safe to re-run when the indexed tree changes)
 podman compose --profile index run --rm indexer
@@ -88,13 +90,15 @@ static snapshot, or `--gpu` to also run the GPU probe from
 
 ```
 app/                  C++ client (llm-client) that calls the agent
+config/               GPU profiles (config/profiles/), compose overlays (config/compose/), observability
 sample/               calculator fixture indexed by default (known bugs)
-services/             agent, indexer, tools (Python/FastAPI)
+services/             agent, indexer, mcp, patch, tools, trainer (Python/FastAPI)
 containers/           one Containerfile per service, plus docs/devtools
 docs/                 mkdocs-material documentation site
-scripts/deploy.py     the command you run; forwards to scripts/host/deploy.py
-scripts/host/         manual scripts (deploy, optional venv, permissions, train hook)
+scripts/deploy.py     the command you run; implementation is scripts/host/deploy/
+scripts/host/         host scripts (deploy package, functional_check, workspaces, evo_x5_serve, ...)
 scripts/container/    fetch_models, convert_lora, eval_rag, eval_tools (Compose only)
+state/                runtime state (workspaces.json, compose.workspaces.yaml, locks, pid)
 tests/                pytest suites per service + integration smoke test
 .devcontainer/        reuses the devtools compose service for editor integration
 compose.yaml          all networking/volumes/healthchecks/profiles

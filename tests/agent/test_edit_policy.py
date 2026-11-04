@@ -20,6 +20,10 @@ def setup_function() -> None:
     edit_policy.reset_edit_phase()
 
 
+def teardown_function() -> None:
+    edit_policy.reset_edit_phase()
+
+
 def test_build_is_blocked_while_edits_are_open() -> None:
     edit_policy.observe_tool("begin_plan")
     assert "build_step" in (edit_policy.gate_tool("build") or "")

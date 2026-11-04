@@ -21,7 +21,7 @@ poste, et le modèle n'a jamais de shell.
 | Mot | Ici, ça veut dire |
 |---|---|
 | Modèle de chat | Un programme qui continue un texte. Celui qui est servi connaît C++ en général. Il ne connaît pas vos fichiers tant qu'on ne les lui montre pas dans la question. |
-| Fenêtre | La quantité de texte qu'il peut regarder pour une réponse. Le réglage actuel est 32 768 jetons : quelques dizaines de fichiers, pas un arbre de dix mille. |
+| Fenêtre | La quantité de texte qu'il peut regarder pour une réponse. 32 768 jetons sur les profils 14B, 262 144 sur l'EVO-X5. Quelques dizaines de fichiers, pas un arbre de dix mille. |
 | Index | Un catalogue des fonctions, classes et sections du dépôt. On ne met pas l'arbre entier dans la fenêtre. On y met les quelques morceaux qui collent à la question. |
 | Empreinte | Un vecteur de nombres qui résume un morceau. Deux morceaux proches dans le code donnent des empreintes proches. C'est ce qui permet de chercher « par le sens », pas seulement par le mot exact. |
 | Outil | Une action nommée et bornée : compiler ce fichier, lire ces lignes, lister les appelants. Chaque action a des arguments validés. Il n'y a pas de commande libre. |
@@ -43,6 +43,7 @@ besoin.
 | `qdrant` | L'étagère des empreintes. Une collection par dépôt distant, partagée par les copies de ce dépôt. |
 | `indexer` | Un passage unique : il découpe l'arbre, calcule les empreintes, range le catalogue. Ce n'est pas un serveur qui reste allumé. |
 | `tools` | Compile, teste, lit, cherche, interroge clangd, lit Git ou Subversion. Montage en lecture seule. |
+| `patch` | Seul processus dont la copie est en écriture. `edit` renvoie un diff, `apply` l'écrit. Pas de commit. |
 
 Le modèle de chat, l'étagère et le bac à sable ne se parlent pas entre eux.
 Seul `agent` est sur les trois réseaux. Un modèle qui invente un appel ne

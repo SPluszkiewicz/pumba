@@ -3,12 +3,13 @@
 The plain-language version is [Comprendre sans bagage](en-clair.md).
 This page is the loop.
 
-The agent can act on the mounted tree by calling the `tools` service:
-build, test, compile one file, lint, format-check, static-analyze, search,
-list, read, read-only git, read-only svn, and clangd (definition,
-references, hover, symbols, outline, callers, types). Twenty-three names,
-no shell. This page explains the bounded loop and what happens when the
-model misbehaves. MCP `ask` does not receive this schema.
+The agent can act on the mounted tree by calling the `tools` and `patch`
+services: build, test, compile one file, cached `build_step`, controlled
+working-copy edits (`begin_plan`, `edit`, `apply`), lint, format-check,
+static-analyze, search, list, read, read-only git, read-only svn, and
+clangd (definition, references, hover, symbols, outline, callers, types).
+Twenty-seven names, no shell. This page explains the bounded loop and what
+happens when the model misbehaves. MCP `ask` does not receive this schema.
 
 ## When tools are offered
 

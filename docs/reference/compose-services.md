@@ -6,10 +6,10 @@ definitions - this page is a summary for orientation.
 | Service | Image / build | Networks | Published port | Profile | Healthcheck |
 |---|---|---|---|---|---|
 | `qdrant` | `qdrant/qdrant:v1.19.0` | `core-net` | none | *(default)* | bash `/dev/tcp` connect check on 6333 |
-| `llm` | `containers/llm/Containerfile` | `core-net`, `publish-net` | `127.0.0.1:8080` | *(default)* | `curl` on `/health` (8080) |
+| `llm` | `containers/llm/Containerfile` | `core-net`, `publish-net` | `127.0.0.1:8080` | *(default)*; not started on `evo-x5` | `curl` on `/health` (8080) |
 | `embedder` | `containers/embedder/Containerfile` | `core-net` | none | *(default)* | `curl` on `/health` (8081) |
 | `reranker` | same Containerfile as `embedder` | `core-net` | none | *(default)* | `curl` on `/health` (8082) |
-| `agent` | `containers/agent/Containerfile` | `client-net`, `core-net`, `tools-net` | none (see `ui-proxy`) | *(default)* | `curl` on `/health` (8090) |
+| `agent` | `containers/agent/Containerfile` | `client-net`, `core-net`, `tools-net` (plus `publish-net` on `evo-x5`) | none (see `ui-proxy`) | *(default)* | `curl` on `/health` (8090) |
 | `ui-proxy` | `nginxinc/nginx-unprivileged:1.27-alpine` | `client-net`, `publish-net` | `127.0.0.1:8090` (`/ui`) | *(default)* | — |
 | `mcp` | `containers/mcp/Containerfile` | `client-net`, `publish-net` | `127.0.0.1:8092` | *(default)* | `curl` on `/health` (8092) |
 | `tools` | `containers/tools/Containerfile` | `tools-net` | none | *(default)* | `wget` on `/health` (8091) |

@@ -47,6 +47,19 @@ def test_session_ignores_notifications() -> None:
     thread.join(timeout=5)
 
 
+def test_buffered_pipe_does_not_block_waiting_for_4096_bytes() -> None:
+    r_fd, w_fd = os.pipe()
+    reader_stream = io.BufferedReader(os.fdopen(r_fd, "rb", buffering=0), buffer_size=4096)
+    writer_stream = os.fdopen(w_fd, "wb", buffering=0)
+    try:
+        writer_stream.write(encode_message({"jsonrpc": "2.0", "id": 1, "result": {"ok": True}}))
+        msg = MessageReader(reader_stream).read()
+        assert msg is not None and msg["result"] == {"ok": True}
+    finally:
+        writer_stream.close()
+        reader_stream.close()
+
+
 def test_format_locations_is_one_based_and_stays_inside_the_tree() -> None:
     prefix = "file:///workspace/app/"
     text, truncated = format_locations(
@@ -58,6 +71,23 @@ def test_format_locations_is_one_based_and_stays_inside_the_tree() -> None:
         limit=1,
     )
     assert text.startswith("src/a.hpp:12:5")
+
+
+def test_format_related_symbols_keeps_system_header_supertypes() -> None:
+    prefix = "file:///workspace/app/"
+    text, truncated = format_related_symbols(
+        [
+            {
+                "name": "runtime_error",
+                "uri": "file:///usr/include/c%2B%2B/13/stdexcept",
+                "selectionRange": {"start": {"line": 218, "character": 8}},
+            }
+        ],
+        prefix,
+        role="to",
+    )
+    assert text == "runtime_error stdexcept:219"
+    assert truncated is False
     assert "passwd" not in text
     assert truncated is False
 

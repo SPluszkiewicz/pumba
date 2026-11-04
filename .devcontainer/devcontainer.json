@@ -5,7 +5,7 @@
   // user or workspace settings.json:
   //   "dev.containers.dockerPath": "podman"
   // This is an editor-level setting; devcontainer.json cannot set it itself.
-  "name": "local_llm devtools",
+  "name": "Pumba devtools",
   // Reuses the `devtools` service defined in compose.yaml (which builds
   // containers/devtools/Containerfile) instead of duplicating build config -
   // that Containerfile + compose.yaml together are the single source of

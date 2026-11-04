@@ -1,0 +1,11 @@
+# EVO-X5. The chat model is llama-server on the host. `deploy.py up` does
+# not start the llm container. The agent reaches that process through the
+# host gateway. publish-net has no default route, so this does not open
+# an outbound path to the internet.
+
+services:
+  agent:
+    networks:
+      - publish-net
+    extra_hosts:
+      - "host.containers.internal:host-gateway"

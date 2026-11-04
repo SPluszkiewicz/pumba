@@ -45,7 +45,8 @@ The indexer gets this by actually parsing the C++ with
 [tree-sitter](https://tree-sitter.github.io/tree-sitter/) instead of
 treating source files as plain text. `chunker.py` walks the real syntax
 tree produced by the `tree-sitter-cpp` grammar and emits one chunk per
-`function_definition`, `class_specifier`, or `struct_specifier` node it
+`function_definition`, free-function `declaration` (e.g. a header prototype
+sitting beside a class), `class_specifier`, or `struct_specifier` node it
 finds (with a couple of small refinements below).  A chunk that fails to
 map onto a clean function/class boundary still has to go *somewhere*, so
 whole files that contain nothing but macros, `#include`s, or global
@@ -109,7 +110,7 @@ wrong):
 What the grammars do not decide - and is therefore the only policy written
 in this module - is sizing: consecutive small units (CMake commands, YAML
 keys, JSON pairs) are **packed** together up to 60 lines so we never embed a
-one-line chunk (the symbol then lists the first names: `local_llm_app, app,
+one-line chunk (the symbol then lists the first names: `pumba_app, app,
 agent_client_test, …`), and any unit longer than 120 lines or 1800
 characters is cut into overlapping windows with the unit's name kept as a
 prefix (`services <lines 1-60>`). Files over 1 MiB or containing NUL bytes are
@@ -171,10 +172,10 @@ problem reduces to one question: *what should a chunk's point ID be, such
 that re-chunking the same logical unit of code always produces the same ID?*
 
 The indexer's answer, per the pinned schema in `CONTRACTS.md`, is to derive
-the ID deterministically from `(file_path, symbol_name, start_line)`:
+the ID deterministically from `(file_path, git_blob_hash, symbol_name, start_line)`:
 
 ```python
-uuid.uuid5(FIXED_NAMESPACE, f"{file_path}\x1f{symbol_name}\x1f{start_line}")
+uuid.uuid5(FIXED_NAMESPACE, f"{file_path}\x1f{git_blob_hash}\x1f{symbol_name}\x1f{start_line}")
 ```
 
 A few things make this work reliably:
@@ -190,13 +191,17 @@ A few things make this work reliably:
 - **A separator character joins the fields before hashing**, so that
   `("ab", "1", 0)` and `("a", "b1", 0)` can't collide by having their
   concatenated strings happen to match.
-- **The payload (`text`, `git_blob_hash`, `end_line`, ...) is *not* part of
-  the ID.** This is intentional: if a function's body changes but its name
-  and starting line don't move, re-indexing should *update* the existing
-  point in place, not create a second one next to a now-stale copy. The
-  `git_blob_hash` field exists precisely so that a downstream process (or a
-  human) can tell whether a given point's content is still fresh without
-  needing the ID itself to encode content.
+- **`git_blob_hash` is part of the point ID, and `checkouts` lists the working copies that hold that blob.**
+  Point ID is `uuid5(file_path, git_blob_hash, symbol_name, start_line)`.
+  When two branches or SVN checkouts share the same file content, they
+  have the same `git_blob_hash`: the indexer simply attaches the second
+  `checkout_id` (`co_<hash>`) to the existing points' `checkouts` array
+  without re-embedding. When a file differs on another branch, its chunks
+  get a distinct `git_blob_hash` and coexist in the same collection; at
+  query time (`lookup` / `/chat`), Qdrant filters on `checkouts` for the
+  active `X-Workspace`. When a file changes or is deleted on a checkout,
+  that checkout is detached from the old points, and points with no
+  remaining checkout are deleted.
 
 The practical result: running the batch job twice over an unchanged
 codebase leaves Qdrant in exactly the same state as running it once

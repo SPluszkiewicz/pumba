@@ -23,18 +23,21 @@ python scripts/deploy.py workspace d:/svn/ticket-143
 python scripts/deploy.py workspace --update d:/svn/ticket-142
 ```
 
-The first command indexes `ticket-142` once. The second only records the
-other path and mounts it beside the first (`/checkouts/<id>` in `tools`
-and `agent`). Adding a mount recreates those two containers. Switching
-between copies that are already mounted does not. `--update` re-embeds
-files whose content hash changed, into the shared collection, and does
-not copy uncommitted edits into it.
+The first command embeds `ticket-142` once into the repository collection
+and tags its points with that checkout's ID (`co_<hash>`). The second
+command walks `ticket-143` (even on another branch): files whose
+`git_blob_hash` already exists in the collection simply get `ticket-143`'s
+checkout ID attached to their `checkouts` payload without re-embedding, and
+only files that differ on that branch are embedded. Adding a mount recreates
+`tools`, `patch`, `agent`, and `ui-proxy`. `--update` refreshes the active
+checkout's blob links and embeds any newly changed files.
 
 A question carries the checkout path (`X-Workspace` in that folder's
-`.vscode/mcp.json`, or `"workspace"` on `POST /chat`). The agent searches
-that repository's collection, runs tools on that checkout, and adds
-`svn status` or `git status` for uncommitted files. An unregistered path
-is refused. The MCP URL stays `http://127.0.0.1:8092/mcp`.
+`.vscode/mcp.json`, or `"workspace"` on `POST /chat`). The agent filters
+that repository's Qdrant collection by `checkouts` (`co_<hash>`), runs tools
+on that checkout, and adds `svn status` or `git status` for uncommitted
+files. An unregistered path is refused. The MCP URL stays
+`http://127.0.0.1:8092/mcp`.
 
 One indexer runs at a time. A question on a repository that is already
 indexed does not wait for a first index of a different remote, except

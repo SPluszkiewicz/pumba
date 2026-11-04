@@ -9,10 +9,11 @@ import evo_x5_serve as serve
 
 def test_vulkan_command_pins_alias_context_and_the_temperature_pair():
     weight = Path("models/UD-Q5_K_M/model.gguf")
-    none = serve.serve_argv("llama-server", weight, reasoning="none", port=8080)
-    high = serve.serve_argv("llama-server", weight, reasoning="high", port=8080)
+    none = serve.serve_argv("llama-server", weight, reasoning="none", port=8080, context="262144")
+    high = serve.serve_argv("llama-server", weight, reasoning="high", port=8080, context="262144")
     assert "--alias" in none and none[none.index("--alias") + 1] == "mistral-small-4"
-    assert "--host" in none and none[none.index("--host") + 1] == "127.0.0.1"
+    assert "--host" in none and none[none.index("--host") + 1] == "0.0.0.0"
+    assert none[none.index("-c") + 1] == "262144"
     assert "--fit" not in none
     assert "0.1" in none
     assert "0.7" in high
@@ -40,6 +41,7 @@ def test_print_does_not_require_the_binary(capsys):
     assert "mistral-small-4" in out
     assert "reasoning_effort" in out
     assert "0.7" in out
+    assert "262144" in out
 
 
 def test_run_stops_when_the_binary_is_missing(monkeypatch):

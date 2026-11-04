@@ -1,4 +1,4 @@
-site_name: Local LLM + C++/CMake Coding Assistant
+site_name: Pumba
 site_description: A RAG-based coding assistant, fully containerized and offline, built around a C++/CMake project.
 docs_dir: docs
 
@@ -49,12 +49,12 @@ nav:
       - Tool calling: concepts/tool-calling.md
   - Guides:
       - Using the assistant: guides/using-the-assistant.md
-      - Using VS Code: guides/vscode.md
+      - VS Code & Continue (FR): guides/vscode.md
       - External MCP migration (FR): guides/migration-mcp-externe.md
       - External libraries roadmap (FR): guides/roadmap-libs-externes.md
       - Functional checks (FR): guides/prompt-tests-fonctionnels.md
       - RTX 6000 scenarios (FR): guides/rtx6000-scenarios.md
-      - EVO-X5 agent comparison (FR): guides/evo-x5-agent-compare.md
+      - EVO-X5 deploy (FR): guides/evo-x5.md
       - Adding a new tool: guides/adding-a-new-tool.md
       - Reindexing the codebase: guides/reindexing-the-codebase.md
       - Fine-tuning the codebase: guides/fine-tuning-the-codebase.md

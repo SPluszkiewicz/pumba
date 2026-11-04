@@ -64,7 +64,7 @@ python scripts/deploy.py gpu-profile 24g-30b
 
 `16g`, `24g`, and `48g` stay on the 14B. `24g-30b` and `48g-30b` are Qwen3-Coder-30B-A3B (Q5 and Q8). `48g-32b` is Qwen2.5-Coder-32B Q5. The table is in [Troubleshooting GPU](troubleshooting-gpu.md).
 
-`evo-x5` is the GMKtec EVO-X5 Pro (Ryzen AI Max+ PRO 495, 192 Go). It pins Mistral Small 4 Q5 and sets `LLM_GPU_ARG=0` so Compose does not ask for an NVIDIA device. The weights are served by `python scripts/host/evo_x5_serve.py`, not by the CUDA container. The comparison that uses that server is in [Comparaison d'agents](evo-x5-agent-compare.md).
+`evo-x5` is the GMKtec EVO-X5 Pro (Ryzen AI Max+ PRO 495, 192 Go). It pins Mistral Small 4 Q5 and sets `LLM_GPU_ARG=0` so Compose does not ask for an NVIDIA device. `python scripts/deploy.py up` then starts llama-server on the host and does not start the CUDA `llm` container. The steps are in [Déployer sur l'EVO-X5](evo-x5.md).
 
 ## VRAM considerations
 
@@ -75,8 +75,9 @@ The embedder adds ~0.3 GiB. If that OOMs, leave the embedder on CPU
 An **RTX 6000** (Quadro 24 Go, or Ada 48 Go) holds that 14B Q5 at
 `LLM_CTX_SIZE=32768` with a `q8_0` cache, plus the embedder and the
 reranker. Leave `LLM_NGL=999` so leftover layers are not spilled onto
-the Xeon. Do not raise the context: 32 768 is the length this model was
-trained for. Set `LLM_THREADS` to the Xeon's physical core count.
+the Xeon. Do not raise the 14B context: 32 768 is the length that model was
+trained for. The `evo-x5` profile is 262144, the Mistral Small 4 window.
+Set `LLM_THREADS` to the Xeon's physical core count.
 
 On **8–12 GB** cards, leave `embedder` on CPU:
 

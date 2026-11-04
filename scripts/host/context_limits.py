@@ -163,8 +163,8 @@ def _env_model() -> Path | None:
     for line in env.read_text(encoding="utf-8").splitlines():
         if line.startswith("LLM_MODEL_PATH="):
             raw = line.split("=", 1)[1].strip()
-            name = Path(raw).name
-            candidate = Path("models") / name
+            relative = raw.removeprefix("/models/").lstrip("/")
+            candidate = Path("models") / (relative or Path(raw).name)
             if candidate.is_file():
                 return candidate
     return None

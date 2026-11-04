@@ -74,10 +74,12 @@ reader-friendly walkthrough; this file is the flat checklist.
 - Read-only root filesystem on `agent` and `tools`, with narrowly-scoped
   `tmpfs` mounts only where genuinely needed (`/tmp`, and `tools`'
   `/workspace/scratch`).
-- `app`, `tools`, and `indexer` only ever get read-only bind mounts of the
-  source tree (`${CODEBASE_PATH:-./sample}:/workspace/app:ro`) - none of them
-  can write back into the project. Pointing `CODEBASE_PATH` at a larger
-  tree widens what `tools` can read and search, still read-only.
+- `app`, `tools`, `agent`, and `indexer` only ever get read-only bind mounts
+  of the source tree (`${CODEBASE_PATH:-./sample}:/workspace/app:ro`).
+  `patch` (`tools-net`, not published) is the only process whose checkout
+  mount is read-write: `edit` proposes an exact replacement and `apply`
+  writes that copy. There is no commit and no push. Pointing `CODEBASE_PATH`
+  at a larger tree widens what `tools` can read and search, still read-only.
 
 ## Authentication
 
@@ -86,11 +88,13 @@ reader-friendly walkthrough; this file is the flat checklist.
 - `mcp` is published on **loopback only** (`127.0.0.1:8092`) and forwards
   `ask` to that same `/chat` with the bearer. Do not publish `0.0.0.0`.
 - `agent` is reached from the host through `ui-proxy` on **loopback only**
-  (`127.0.0.1:8090`) for `GET /ui`. `agent` itself stays on internal networks.
+  (`127.0.0.1:8090`) for `GET /ui`. `agent` itself stays on internal networks
+  (plus `publish-net` on `evo-x5` so it can call the host `llama-server`;
+  that network has no default route).
   That page does not embed the token. `/chat`, `/chat/stream`, and `/review`
   still require the bearer. Do not publish `0.0.0.0`.
-- `tools` has no authentication of its own - it relies entirely on network
-  segmentation (only `agent` can reach it at all). Don't attach `tools` to
+- `tools` and `patch` have no authentication of their own - they rely on network
+  segmentation (only `agent` can reach them). Don't attach them to
   any other network without adding an equivalent control.
 
 ## Model integrity

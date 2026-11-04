@@ -16,6 +16,7 @@ from agent_client import (
 )
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
+from product import MCP_SERVER
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
@@ -23,7 +24,7 @@ MCP_PORT = int(os.getenv("MCP_PORT", "8092"))
 workspace_header: ContextVar[str] = ContextVar("workspace_header", default="")
 
 mcp = FastMCP(
-    "local-llm",
+    MCP_SERVER,
     instructions=(
         "Tools for the checkout named by X-Workspace. "
         "lookup, check, outline, calls, and types return facts and must be used for those jobs. "
