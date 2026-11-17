@@ -17,6 +17,7 @@ mock a single HTTP transport for everything.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -332,14 +333,24 @@ def clip_excerpt(text: str, limit: int = 400) -> str:
     return cleaned[:limit].rstrip() + "…"
 
 
+_PRESET_QUESTION = re.compile(r"(?i)\bpresets?\b")
+
+
 def drop_noise_chunks(chunks: list[RetrievedChunk], query: str, top_k: int) -> list[RetrievedChunk]:
-    """Drop editor and preset files unless the question names them."""
+    """Drop editor and preset files unless the question names them.
+
+    A question about configure presets keeps CMakePresets.json. That file is
+    noise for a C++ question, and it is the answer for a presets question.
+    """
     named = set(paths_in_query(query))
-    kept = [
-        chunk
-        for chunk in chunks
-        if not is_noise_path(chunk.file_path) or chunk.file_path.replace("\\", "/") in named
-    ]
+    wants_presets = _PRESET_QUESTION.search(query) is not None
+    kept = []
+    for chunk in chunks:
+        path = chunk.file_path.replace("\\", "/")
+        if is_noise_path(path) and path not in named:
+            if not (wants_presets and path.endswith("CMakePresets.json")):
+                continue
+        kept.append(chunk)
     if not kept:
         kept = list(chunks)
     return kept[:top_k]

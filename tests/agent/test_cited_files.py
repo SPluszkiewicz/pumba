@@ -39,3 +39,17 @@ def test_noise_chunks_lose_their_slot_unless_named() -> None:
     assert is_noise_path("CMakePresets.json")
     named = drop_noise_chunks(chunks, "montre CMakePresets.json", 5)
     assert any(chunk.file_path == "CMakePresets.json" for chunk in named)
+
+
+def test_preset_question_keeps_the_presets_file() -> None:
+    chunks = [
+        RetrievedChunk("CMakePresets.json", 1, 10, "presets"),
+        RetrievedChunk("CMakeLists.txt", 1, 20, "lists"),
+        RetrievedChunk(".vscode/mcp.json", 1, 4, "editor"),
+    ]
+    kept = drop_noise_chunks(
+        chunks,
+        "What configure presets are defined for this project's build?",
+        5,
+    )
+    assert [chunk.file_path for chunk in kept] == ["CMakePresets.json", "CMakeLists.txt"]
