@@ -208,5 +208,7 @@ jobs:
           print("services did not become healthy in time", file=sys.stderr); sys.exit(1)
           PY
           podman compose --env-file .env.test --profile index run --rm indexer
-          podman compose --env-file .env.test run --rm devtools python scripts/container/eval_rag.py
+          # smoke-test is the container that can reach agent and carries
+          # AGENT_BEARER_TOKEN. devtools has neither (see eval_rag.py).
+          podman compose --env-file .env.test --profile test run --rm smoke-test python scripts/container/eval_rag.py
           podman compose --env-file .env.test down
