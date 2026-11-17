@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+import time
 from types import SimpleNamespace
 
 import llm_client
@@ -144,6 +146,67 @@ def test_chat_stream_sse_events(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "conv-1" in resp.text
 
 
+def test_same_conversation_waits_instead_of_409(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENT_BEARER_TOKEN", "secret-token")
+
+    async def fake_turn(*_args, **_kwargs):
+        return main.ChatResponse(
+            answer="ok",
+            sources=[],
+            used_context=False,
+            tool_calls=[],
+            conversation_id="busy-id",
+        )
+
+    monkeypatch.setattr(main, "execute_turn", fake_turn)
+    main.TURNS.start("busy-id")
+    threading.Thread(target=lambda: (time.sleep(0.05), main.TURNS.finish("busy-id")), daemon=True).start()
+    try:
+        with TestClient(main.app) as client:
+            resp = client.post(
+                "/chat",
+                json={"query": "hello", "conversation_id": "busy-id"},
+                headers={"Authorization": "Bearer secret-token"},
+            )
+            stream = client.post(
+                "/chat/stream",
+                json={"query": "hello", "conversation_id": "busy-id"},
+                headers={"Authorization": "Bearer secret-token"},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["answer"] == "ok"
+        assert stream.status_code == 200
+        assert "event: done" in stream.text
+    finally:
+        main.TURNS.finish("busy-id")
+
+
+def test_chat_registers_turn_so_cancel_can_stop_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENT_BEARER_TOKEN", "secret-token")
+    seen: dict[str, object] = {}
+
+    async def fake_turn(*_a, **kwargs):
+        seen["cancel_event"] = kwargs.get("cancel_event")
+        return main.ChatResponse(
+            answer="ok",
+            sources=[],
+            used_context=False,
+            tool_calls=[],
+            conversation_id="abc",
+        )
+
+    monkeypatch.setattr(main, "execute_turn", fake_turn)
+    with TestClient(main.app) as client:
+        resp = client.post(
+            "/chat",
+            json={"query": "hello", "conversation_id": "abc"},
+            headers={"Authorization": "Bearer secret-token"},
+        )
+    assert resp.status_code == 200
+    assert seen["cancel_event"] is not None
+    assert main.TURNS.active("abc") is False
+
+
 def test_chat_returns_conversation_id(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AGENT_BEARER_TOKEN", "secret-token")
 
@@ -165,3 +228,15 @@ def test_chat_returns_conversation_id(monkeypatch: pytest.MonkeyPatch) -> None:
         )
     assert resp.status_code == 200
     assert resp.json()["conversation_id"] == "abc"
+
+
+def test_api_messages_drop_the_tool_name() -> None:
+    sent = llm_client.api_messages(
+        [{"role": "tool", "name": "build_step", "tool_call_id": "c1", "content": "{}"}]
+    )
+    assert sent == [{"role": "tool", "tool_call_id": "c1", "content": "{}"}]
+
+
+def test_finish_reason_reads_length() -> None:
+    assert llm_client.finish_reason({"choices": [{"finish_reason": "length", "message": {}}]}) == "length"
+    assert llm_client.finish_reason({"choices": [{"message": {}}]}) is None

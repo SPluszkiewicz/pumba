@@ -4,7 +4,20 @@
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
   "id": null,
-  "links": [],
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "dashboard",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
+      "title": "Analyse",
+      "tooltip": "Tours, contexte, RAG, outils, modèle et index",
+      "type": "link",
+      "url": "/d/pumba-analyse"
+    }
+  ],
   "panels": [
     {
       "collapsed": false,
@@ -163,8 +176,8 @@
       "gridPos": { "h": 8, "w": 4, "x": 20, "y": 31 },
       "id": 14,
       "options": { "colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
-      "targets": [{ "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(tool_call_malformed_total)", "legendFormat": "malformés", "refId": "A" }],
-      "title": "Appels malformés",
+      "targets": [{ "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "increase(tool_call_malformed_total[$__range])", "legendFormat": "malformés", "refId": "A" }],
+      "title": "Appels malformés (fenêtre)",
       "type": "stat"
     },
     {

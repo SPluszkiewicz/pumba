@@ -1,13 +1,15 @@
-# CPU fallback overlay for `podman compose -f compose.yaml -f compose.cpu.yaml`.
+# CPU fallback overlay for `podman compose -f compose.yaml -f config/compose/cpu.yaml`.
 # Used automatically by `scripts/deploy.py up` when NVIDIA CDI is unavailable
 # (unresolvable nvidia.com/gpu=all). See docs/guides/troubleshooting-gpu.md.
+#
+# `devices: []` would append to compose.yaml's CDI list. `!override` replaces it.
 
 services:
   llm:
     build:
       args:
         GPU: "0"
-    devices: []
+    devices: !override []
     environment:
       - LLM_NGL=0
 
@@ -15,7 +17,7 @@ services:
     build:
       args:
         GPU: "0"
-    devices: []
+    devices: !override []
     environment:
       - EMBEDDER_NGL=0
 
@@ -23,9 +25,9 @@ services:
     build:
       args:
         GPU: "0"
-    devices: []
+    devices: !override []
     environment:
       - EMBEDDER_NGL=0
 
   trainer:
-    devices: []
+    devices: !override []

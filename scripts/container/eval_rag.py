@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Golden-question retrieval check for the RAG pipeline.
 
-Runs only INSIDE a container (devtools, or ad hoc via `podman compose run
---rm devtools python scripts/container/eval_rag.py`) against a already-running,
-already-indexed stack (`podman compose up` + `podman compose --profile index
-run --rm indexer` must have happened first).
+Runs only INSIDE a container that reaches `agent` and has AGENT_BEARER_TOKEN:
+the `smoke-test` service (`podman compose --profile test run --rm smoke-test
+python scripts/container/eval_rag.py`). `devtools` has neither. It needs an
+already-running, already-indexed stack (`podman compose up` + `podman compose
+--profile index run --rm indexer` must have happened first).
 
 This deliberately checks RETRIEVAL quality (did the expected file/symbol show
 up in `sources`), not exact free-text answer correctness - LLM output is not

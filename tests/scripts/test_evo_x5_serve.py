@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import io
+import tarfile
+import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import evo_x5_serve as serve
 
@@ -44,8 +48,67 @@ def test_print_does_not_require_the_binary(capsys):
     assert "262144" in out
 
 
-def test_run_stops_when_the_binary_is_missing(monkeypatch):
+def _packed(kind: str, binary_name: str) -> bytes:
+    if kind == "zip":
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as archive:
+            archive.writestr(binary_name, b"vulkan-binary")
+        return buf.getvalue()
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as archive:
+        payload = b"vulkan-binary"
+        info = tarfile.TarInfo(name=binary_name)
+        info.size = len(payload)
+        archive.addfile(info, io.BytesIO(payload))
+    return buf.getvalue()
+
+
+def test_missing_server_is_installed_from_the_pinned_vulkan_release(tmp_path, monkeypatch):
+    cases = (
+        ("win32", "llama-b10216-bin-win-vulkan-x64.zip", "llama-server.exe", "zip"),
+        ("linux", "llama-b10216-bin-ubuntu-vulkan-x64.tar.gz", "llama-server", "tar"),
+    )
+    for system, asset, binary_name, kind in cases:
+        payload = _packed(kind, binary_name)
+        seen: list[str] = []
+
+        def opener(url: str, _payload: bytes = payload) -> io.BytesIO:
+            seen.append(url)
+            return io.BytesIO(_payload)
+
+        cache = tmp_path / system
+        installed = serve.install_pinned_server(cache, backend="vulkan", system=system, opener=opener)
+        assert installed == cache / binary_name
+        assert installed.read_bytes() == b"vulkan-binary"
+        assert seen == [
+            "https://github.com/ggml-org/llama.cpp/releases/download/b10216/" + asset
+        ]
+        again = serve.install_pinned_server(
+            cache, backend="vulkan", system=system, opener=lambda _url: (_ for _ in ()).throw(AssertionError("second"))
+        )
+        assert again == installed
+
+
+def test_run_uses_the_installed_binary_when_path_has_none(monkeypatch, tmp_path):
+    binary = tmp_path / "llama-server"
+    binary.write_bytes(b"x")
     monkeypatch.setattr(serve.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(serve, "install_pinned_server", lambda *_a, **_k: binary)
+    monkeypatch.setattr(serve, "missing_shards", lambda _path: [])
+    seen: dict[str, list[str]] = {}
+
+    def fake_run(command, **_kwargs):
+        seen["command"] = command
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(serve.subprocess, "run", fake_run)
+    assert serve.main(["--run"]) == 0
+    assert seen["command"][0] == str(binary)
+
+
+def test_run_stops_when_the_binary_cannot_be_installed(monkeypatch):
+    monkeypatch.setattr(serve.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(serve, "install_pinned_server", lambda *_a, **_k: None)
     assert serve.main(["--run", "--binary", "llama-server-absent"]) == 1
 
 

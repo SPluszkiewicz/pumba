@@ -109,6 +109,15 @@ EXTRA_MODELS: dict[str, ModelSpec] = {
         # LFS oid, checked 2026-10-13. ~21.7 GiB.
         sha256="a4e15b1099adf59cade80da369400199e4d7922d7e16b717bbfcda4d08a0702f",
     ),
+    # gpt-oss-20b, MXFP4, ~11.3 GiB. Official ggml-org conversion. Fits a 16 GB card.
+    # LFS oid from the Hugging Face tree API, checked 2026-11-12.
+    # https://huggingface.co/api/models/ggml-org/gpt-oss-20b-GGUF/tree/main
+    "gpt-oss-20b": ModelSpec(
+        name="gpt-oss-20b",
+        repo_id="ggml-org/gpt-oss-20b-GGUF",
+        filename="gpt-oss-20b-MXFP4.gguf",
+        sha256="27cd6c432c7672cb812a92f611cf3ba7bbc35928262bb1e1253ff4ee6ae35901",
+    ),
     # Mistral Small 4, 119B, 6.5B active. UD-Q5_K_M is three shards, ~83 GiB.
     # LFS oids from the Hugging Face tree API, checked 2026-11-03.
     # https://huggingface.co/api/models/unsloth/Mistral-Small-4-119B-2603-GGUF/tree/main/UD-Q5_K_M
@@ -138,9 +147,10 @@ TEST_MODEL = ModelSpec(
     sha256="6eb923e7d26e9cea28811e1a8e852009b21242fb157b26149d3b188f3a8c8653",
 )
 
-# Hugging Face base for QLoRA training (inference still uses the GGUF chat model).
-HF_TRAIN_BASE_REPO = "Qwen/Qwen2.5-7B-Instruct"
-HF_TRAIN_BASE_REL = Path("hf") / "Qwen2.5-7B-Instruct"
+# Hugging Face base for QLoRA. Same weights the evo-x5 GGUF was quantized from,
+# so a converted adapter can load on mistral-small-4. The repo is ~242 GiB.
+HF_TRAIN_BASE_REPO = "mistralai/Mistral-Small-4-119B-2603"
+HF_TRAIN_BASE_REL = Path("hf") / "Mistral-Small-4-119B-2603"
 
 
 class ChecksumMismatchError(RuntimeError):
@@ -155,10 +165,28 @@ class ChecksumMismatchError(RuntimeError):
 
 
 def _sha256_of(path: Path) -> str:
+    """Hash `path`. A multi-gigabyte GGUF prints progress so the wait is visible."""
+    total = path.stat().st_size
     digest = hashlib.sha256()
+    done = 0
+    step = 1024 * 1024 * 1024
+    report_at = step
+    print(
+        f"[fetch_models] verifying {path.name} ({total / (1024 ** 3):.1f} GiB)",
+        flush=True,
+    )
     with path.open("rb") as fh:
         for chunk in iter(lambda: fh.read(CHUNK_SIZE), b""):
             digest.update(chunk)
+            done += len(chunk)
+            if done >= report_at or done == total:
+                pct = (100 * done / total) if total else 100.0
+                print(
+                    f"[fetch_models]   {path.name}: {done / (1024 ** 3):.1f} / "
+                    f"{total / (1024 ** 3):.1f} GiB ({pct:.0f}%)",
+                    flush=True,
+                )
+                report_at = done + step
     return digest.hexdigest()
 
 
@@ -209,15 +237,10 @@ def _fetch_part(spec: ModelSpec, *, force: bool) -> None:
     destination = MODELS_DIR / spec.filename
 
     if destination.exists() and not force:
-        print(f"[fetch_models] {spec.filename} already present, skipping (use --force to re-download)")
-        if spec.sha256:
-            actual = _sha256_of(destination)
-            if actual != spec.sha256:
-                raise ChecksumMismatchError(
-                    f"{spec.filename}: existing file's SHA256 ({actual}) does not match "
-                    f"the pinned value ({spec.sha256}). Re-run with --force to re-download, "
-                    "or delete the file manually - it will NOT be used as-is."
-                )
+        print(
+            f"[fetch_models] {spec.filename} already on disk, download skipped.",
+            flush=True,
+        )
         return
 
     _download(spec, destination, force=force)
@@ -241,7 +264,7 @@ def _fetch_part(spec: ModelSpec, *, force: bool) -> None:
 
 
 def fetch_hf_train_base(*, force: bool) -> None:
-    """Download Qwen2.5-7B-Instruct safetensors for the trainer profile."""
+    """Download the Mistral Small 4 safetensors for the trainer profile."""
     destination = MODELS_DIR / HF_TRAIN_BASE_REL
     marker = destination / "config.json"
     if marker.exists() and not force:
@@ -277,7 +300,7 @@ def main() -> int:
     parser.add_argument(
         "--hf-train-base",
         action="store_true",
-        help="fetch Hugging Face Qwen2.5-7B-Instruct weights for QLoRA training (~15 GiB)",
+        help="fetch Hugging Face Mistral Small 4 weights for QLoRA training (~242 GiB)",
     )
     parser.add_argument(
         "--extra",

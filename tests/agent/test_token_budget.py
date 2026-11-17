@@ -36,6 +36,25 @@ async def test_over_budget_collapses_old_tool_results() -> None:
 
 
 @pytest.mark.asyncio
+async def test_last_build_step_survives_a_long_read() -> None:
+    async def fake_count(_c, text, _r):
+        return 80 if "READLOG" in text else 10
+
+    token_budget.count_tokens = fake_count  # type: ignore[misc]
+    read = {"ok": True, "stdout": "READLOG " + ("r" * 400), "stderr": ""}
+    build = {"ok": False, "stdout": "", "stderr": "error: unknown type", "repair": {"kind": "build_step"}}
+    messages = [
+        {"role": "system", "content": "s"},
+        {"role": "tool", "name": "read_file", "content": json.dumps(read)},
+        {"role": "tool", "name": "build_step", "content": json.dumps(build)},
+    ]
+    out, _n, usage = await token_budget.apply_budget(None, messages, "r", budget=50)
+    assert usage["compressed"] is True
+    assert "collapsed" in out[1]["content"]
+    assert "error: unknown type" in out[2]["content"]
+
+
+@pytest.mark.asyncio
 async def test_over_budget_asks_the_model_to_summarize(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_count(_c, text, _r):
         return 10 if "Summary of earlier context" in text else 500

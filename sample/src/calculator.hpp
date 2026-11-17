@@ -11,7 +11,7 @@ namespace calc {
 // Precedence, high to low:
 //   unary minus
 //   ^   right-associative, and n^0 == 1
-//   * /
+//   * / %
 //   + - left-associative
 //
 // Division by zero and a negative exponent throw CalcError.

@@ -1,7 +1,7 @@
 # Reindexing the codebase
 
-The agent answers questions using whatever was last indexed into Qdrant -
-it does not read the mounted project live on every request. Re-run the
+The agent answers questions using whatever was last indexed into Qdrant.
+It does not read the mounted project live on every request. Re-run the
 indexer any time the indexed source actually changes and you want the
 agent's retrieval to reflect it:
 
@@ -29,8 +29,21 @@ command walks `ticket-143` (even on another branch): files whose
 `git_blob_hash` already exists in the collection simply get `ticket-143`'s
 checkout ID attached to their `checkouts` payload without re-embedding, and
 only files that differ on that branch are embedded. Adding a mount recreates
-`tools`, `patch`, `agent`, and `ui-proxy`. `--update` refreshes the active
-checkout's blob links and embeds any newly changed files.
+`tools`, `agent`, and `ui-proxy` (`index` does the same). `--update`
+refreshes the active checkout's blob links and embeds any newly changed files.
+
+!!! warning "`serena` keeps its old mounts"
+    `deploy.py` does not recreate `serena`, although `state/compose.workspaces.yaml`
+    adds the new checkout to its mounts and `CODEBASE_PATH` is mounted into it
+    too. A container only gets a mount when it is created, so after `workspace`
+    on a new path, or after changing `CODEBASE_PATH`, recreate it by hand with
+    the same files `deploy.py` stacks (Podman shown; on Docker use
+    `config/compose/docker.yaml` instead of `podman.yaml`):
+
+    ```bash
+    podman compose -f compose.yaml -f config/compose/podman.yaml \
+      -f state/compose.workspaces.yaml up -d --force-recreate --no-deps serena
+    ```
 
 A question carries the checkout path (`X-Workspace` in that folder's
 `.vscode/mcp.json`, or `"workspace"` on `POST /chat`). The agent filters
@@ -63,16 +76,22 @@ The indexer parses C++ **and** CMake / Markdown / YAML / JSON / TOML /
 text (see [The indexing pipeline](../concepts/indexing-pipeline.md)). A
 Python or TypeScript repo still indexes almost empty.
 
-File writes back into the mounted tree are **not** implemented yet - the
-mount stays read-only (`:ro`).
+The indexer, `agent`, and `tools` mount the tree read-only (`:ro`). The
+agent changes files through `serena`'s write tools, the only read-write
+checkout mount: that never commits, and those edits are not in the index
+until you re-run `index` or `workspace --update`. In the meantime, on a git
+or svn work tree, the agent reads uncommitted files live and puts them in
+front of the retrieved chunks.
 
 ## When you need to do this
 
 - After editing, adding, or removing files that should enter the shared index (`workspace --update`, or `index` for the default tree).
 - After changing `CODEBASE_PATH` in `.env` (default tree only).
-- After the very first `podman compose up` (there's nothing in Qdrant yet -
-  see [First run](../getting-started/first-run.md)).
-- You do **not** need to re-index just because you restarted the stack -
+- After the very first raw `podman compose up` (there's nothing in Qdrant
+  yet; `python scripts/deploy.py up` already runs the indexer. See
+  [First run](../getting-started/first-run.md)).
+- After `python scripts/deploy.py down --volumes`, which removes `qdrant-data`.
+- You do **not** need to re-index just because you restarted the stack.
   Qdrant's data lives in the `qdrant-data` named volume and survives
   `podman compose down`/`up` cycles.
 
@@ -88,7 +107,8 @@ changed file updates in place after its old points are dropped.
 ## Watch mode
 
 `indexer` also supports `--watch` for continuous re-indexing on file
-changes, but it's best-effort and Linux-preferred - see
+changes: it runs the same full batch first, then listens with a 0.5s
+debounce. It is best-effort and Linux-preferred. See
 [The indexing pipeline](../concepts/indexing-pipeline.md) for why (inotify
 doesn't propagate reliably through a Windows host -> Podman machine -> WSL2
 bind mount). The one-shot command above is the primary supported workflow;

@@ -297,13 +297,7 @@ def _doctor_host_llm_check() -> Check:
 def _doctor_check_services() -> list[Check]:
     host = d._host_llm_selected()
     try:
-        result = subprocess.run(
-            ["podman", "compose", "ps"],
-            cwd=d.REPO_ROOT,
-            capture_output=True,
-            text=True,
-            env=d._compose_env(),
-        )
+        code, stdout, stderr = d._compose_ps_payload()
     except OSError as exc:
         return [
             Check(
@@ -313,17 +307,17 @@ def _doctor_check_services() -> list[Check]:
                 hint="Install Podman - see docs/getting-started/prerequisites.md.",
             )
         ]
-    if result.returncode != 0:
+    if code != 0:
         return [
             Check(
                 "services",
                 "fail",
                 "`podman compose ps` failed",
-                hint=(result.stderr or "").strip()[:300] or None,
+                hint=(stderr or "").strip()[:300] or None,
             )
         ]
 
-    statuses = d._parse_compose_ps_health(result.stdout, d.CORE_SERVICES)
+    statuses = d._health_from_compose_ps(stdout, d.CORE_SERVICES)
     checks: list[Check] = []
     for service in d.CORE_SERVICES:
         if host and service == "llm":

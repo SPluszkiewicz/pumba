@@ -11,6 +11,32 @@ from pathlib import Path
 import deploy as d
 
 
+def _fetch_weights(*, host: bool) -> None:
+    """Download GGUFs. A failed fetch keeps files already on disk; say how to resume."""
+    try:
+        d._run(["podman", "compose", "--profile", "setup", "run", "--rm", "fetch-models"])
+    except subprocess.CalledProcessError:
+        sys.exit(
+            "[deploy] FATAL: downloading the default models failed.\n"
+            "Files already in models/ are kept. Re-run:\n"
+            "  python scripts/deploy.py up\n"
+            "or skip the download if the GGUFs are already there:\n"
+            "  python scripts/deploy.py up --skip-models"
+        )
+    if not host or not d._host_llm_weights_missing():
+        return
+    print("[deploy] default fetch does not include the EVO chat GGUF; fetching it.", flush=True)
+    try:
+        d.cmd_fetch_extra(argparse.Namespace(name="evo-x5"))
+    except subprocess.CalledProcessError:
+        sys.exit(
+            "[deploy] FATAL: downloading the EVO chat GGUF failed.\n"
+            "Retry:\n"
+            "  python scripts/deploy.py fetch-extra evo-x5\n"
+            "  python scripts/deploy.py up --skip-models"
+        )
+
+
 def cmd_up(args: argparse.Namespace) -> int:
     d._require_podman()
     d._ensure_env_file()
@@ -20,19 +46,18 @@ def cmd_up(args: argparse.Namespace) -> int:
     d._prepare_gpu_for_up(env)
 
     if not args.skip_models:
-        d._run(["podman", "compose", "--profile", "setup", "run", "--rm", "fetch-models"])
-        if host and d._host_llm_weights_missing():
-            print("[deploy] default fetch does not include the EVO chat GGUF; fetching it.", flush=True)
-            d.cmd_fetch_extra(argparse.Namespace(name="evo-x5"))
+        d._fetch_weights(host=host)
 
     if host:
         d._require_host_llm_weights()
-        d._start_host_llm(timeout=args.timeout)
+        d._stop_llm_container()
+        d._start_host_llm(timeout=max(args.timeout, d.HOST_LLM_READY_TIMEOUT), wait=False)
     else:
         d._stop_host_llm()
     d._compose_build_and_up(host=host)
     waited = [name for name in d.CORE_SERVICES if not (host and name == "llm")]
     d._wait_healthy(waited, args.timeout)
+    d._wait_published_doors(host=host, timeout=args.timeout)
 
     if not args.skip_index:
         try:

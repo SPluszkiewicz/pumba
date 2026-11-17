@@ -11,11 +11,15 @@ This intentionally does NOT try to spin the stack up itself - compose
 orchestration (build order, `depends_on: condition: service_healthy`) is
 already `compose.yaml`'s job. This test only verifies the stack that's
 already running behaves correctly end-to-end:
-  1. every service's own /health-equivalent endpoint responds
+  1. every service's own /health-equivalent endpoint responds, including
+     `mcp` and `ui-proxy` (not only the five original probes)
   2. `agent`'s bearer-token auth is enforced
-  3. a basic /chat round-trip works and returns the schema CONTRACTS.md
+  3. `GET /models` and `GET /ui` work through `agent` (and ui-proxy)
+  4. `POST /lookup` degrades to empty hits on a fresh Qdrant (no 5xx)
+  5. MCP Streamable HTTP `tools/list` returns the six tools
+  6. a basic /chat round-trip works and returns the schema CONTRACTS.md
      defines (with no indexed context - fresh Qdrant collection is expected)
-  4. a tool-call round-trip is attempted, but its success is NOT a hard
+  7. a tool-call round-trip is attempted, but its success is NOT a hard
      assertion (see note below)
 
 Tool-calling reliability note: the tiny 0.5B CI model swapped in for `llm`
@@ -29,6 +33,7 @@ out entirely (which would indicate a real wiring bug, not model quality).
 
 from __future__ import annotations
 
+import json
 import os
 import time
 
@@ -41,6 +46,8 @@ LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://llm:8080")
 EMBEDDER_BASE_URL = os.environ.get("EMBEDDER_BASE_URL", "http://embedder:8081")
 QDRANT_URL = os.environ.get("QDRANT_URL", "http://qdrant:6333")
 TOOLS_BASE_URL = os.environ.get("TOOLS_BASE_URL", "http://tools:8091")
+MCP_BASE_URL = os.environ.get("MCP_BASE_URL", "http://mcp:8092")
+UI_PROXY_BASE_URL = os.environ.get("UI_PROXY_BASE_URL", "http://ui-proxy:8090")
 
 # Generous: the `llm` service has to load a model into memory on first
 # request/startup, and CI runners are often slow/oversubscribed.
@@ -86,6 +93,8 @@ def wait_for_stack() -> None:
     _wait_until_healthy("embedder", f"{EMBEDDER_BASE_URL}/health")
     _wait_until_healthy("tools", f"{TOOLS_BASE_URL}/health")
     _wait_until_healthy("agent", f"{AGENT_BASE_URL}/health")
+    _wait_until_healthy("mcp", f"{MCP_BASE_URL}/health")
+    _wait_until_healthy("ui-proxy", f"{UI_PROXY_BASE_URL}/health")
 
 
 def _chat(query: str, *, token: str | None = AGENT_BEARER_TOKEN) -> httpx.Response:
@@ -105,6 +114,72 @@ def test_all_services_report_healthy() -> None:
     in test output confirming the wait actually succeeded rather than the
     module silently never running any tests (e.g. a collection error)."""
     assert True
+
+
+def _agent_headers() -> dict[str, str]:
+    return {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {AGENT_BEARER_TOKEN}",
+    }
+
+
+def test_models_and_ui_are_served() -> None:
+    models = httpx.get(f"{AGENT_BASE_URL}/models", headers=_agent_headers(), timeout=30)
+    assert models.status_code == 200, models.text
+    body = models.json()
+    assert body.get("active") or body.get("models")
+
+    ui = httpx.get(f"{AGENT_BASE_URL}/ui", timeout=15)
+    assert ui.status_code == 200, ui.text
+    assert "text/html" in ui.headers.get("content-type", "")
+    assert "Content-Security-Policy" in ui.headers
+
+    proxied = httpx.get(f"{UI_PROXY_BASE_URL}/health", timeout=15)
+    assert proxied.status_code == 200, proxied.text
+
+
+def test_lookup_degrades_when_nothing_is_indexed() -> None:
+    resp = httpx.post(
+        f"{AGENT_BASE_URL}/lookup",
+        json={"query": "Evaluate"},
+        headers=_agent_headers(),
+        timeout=60,
+    )
+    assert resp.status_code == 200, resp.text
+    assert isinstance(resp.json().get("hits"), list)
+
+
+def test_mcp_lists_the_six_tools() -> None:
+    resp = httpx.post(
+        f"{MCP_BASE_URL}/mcp",
+        json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
+        headers={
+            "Accept": "application/json, text/event-stream",
+            "Content-Type": "application/json",
+        },
+        timeout=30,
+    )
+    assert resp.status_code == 200, resp.text
+    payload = resp.json()
+    if not isinstance(payload, dict) or "result" not in payload:
+        events = []
+        event_name = "message"
+        for line in resp.text.splitlines():
+            if line.startswith("event:"):
+                event_name = line.split(":", 1)[1].strip()
+            elif line.startswith("data:"):
+                raw = line.split(":", 1)[1].strip()
+                try:
+                    events.append((event_name, json.loads(raw)))
+                except json.JSONDecodeError:
+                    continue
+        payload = next((data for _, data in events if "result" in data), {})
+    names = {
+        tool.get("name")
+        for tool in (payload.get("result") or {}).get("tools") or []
+        if isinstance(tool, dict)
+    }
+    assert {"lookup", "check", "calls", "types", "ask"} <= names, names
 
 
 def test_agent_rejects_missing_bearer_token() -> None:

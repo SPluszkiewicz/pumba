@@ -22,6 +22,22 @@ def _host_llm_selected() -> bool:
     return d._parse_env_file(d.ENV_FILE).get("LLM_SERVE") == "host"
 
 
+def _host_llm_port() -> str:
+    if not d.ENV_FILE.is_file():
+        return "8080"
+    return (d._parse_env_file(d.ENV_FILE).get("LLM_PORT") or "8080").strip() or "8080"
+
+
+def _host_llm_health_url() -> str:
+    return f"http://127.0.0.1:{_host_llm_port()}/health"
+
+
+def _stop_llm_container() -> None:
+    """Drop a leftover llm container so host llama-server can bind the port."""
+    d._run(["podman", "compose", "stop", "llm"], check=False)
+    d._run(["podman", "compose", "rm", "-f", "llm"], check=False)
+
+
 def _host_llm_alive(pid: int) -> bool:
     if os.name == "nt":
         probe = subprocess.run(
@@ -90,18 +106,24 @@ def _wait_http(
     sys.exit(f"[deploy] FATAL: {url} not ready in {int(timeout)}s. {last}{extra}")
 
 
-def _start_host_llm(*, timeout: int = 300) -> None:
-    """The EVO profile's chat model. `up` owns it; there is no second start command."""
+def _start_host_llm(*, timeout: int = 300, wait: bool = True) -> None:
+    """The EVO profile's chat model. `up` owns it; there is no second start command.
+
+    `wait=False` only spawns the process so compose build can overlap the
+    ~83 Go load. `up` then waits on `/health` via `_wait_published_doors`.
+    """
     if d.HOST_LLM_PID.is_file():
         raw = d.HOST_LLM_PID.read_text(encoding="utf-8").strip()
         if raw.isdigit() and d._host_llm_alive(int(raw)):
             print(f"[deploy] llama-server hôte déjà lancé (pid {raw}).", flush=True)
+            if not wait:
+                return
 
             class _Existing:
                 def poll(self) -> int | None:
                     return None if d._host_llm_alive(int(raw)) else 1
 
-            d._wait_http(d.HOST_LLM_HEALTH_URL, timeout=timeout, process=_Existing())
+            d._wait_http(_host_llm_health_url(), timeout=timeout, process=_Existing())
             return
     d.HOST_LLM_PID.parent.mkdir(parents=True, exist_ok=True)
     log_path = d.HOST_LLM_PID.with_suffix(".log")
@@ -111,8 +133,25 @@ def _start_host_llm(*, timeout: int = 300) -> None:
         kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
     else:
         kwargs["start_new_session"] = True
+    import evo_x5_serve as serve
+
+    port = _host_llm_port()
+    binary = serve.ensure_binary("llama-server", backend="vulkan")
+    if not binary:
+        sys.exit(
+            "[deploy] FATAL: llama-server introuvable sur PATH, "
+            "et le binaire Vulkan b10216 n'a pas pu être installé."
+        )
     proc = subprocess.Popen(
-        [sys.executable, str(d.REPO_ROOT / "scripts" / "host" / "evo_x5_serve.py"), "--run"],
+        [
+            sys.executable,
+            str(d.REPO_ROOT / "scripts" / "host" / "evo_x5_serve.py"),
+            "--run",
+            "--binary",
+            binary,
+            "--port",
+            port,
+        ],
         cwd=d.REPO_ROOT,
         stdout=log,
         stderr=subprocess.STDOUT,
@@ -121,7 +160,8 @@ def _start_host_llm(*, timeout: int = 300) -> None:
     log.close()
     d.HOST_LLM_PID.write_text(str(proc.pid), encoding="utf-8")
     print(f"[deploy] llama-server hôte pid {proc.pid}. Journal {log_path}.", flush=True)
-    d._wait_http(d.HOST_LLM_HEALTH_URL, timeout=timeout, process=proc, log_path=log_path)
+    if wait:
+        d._wait_http(_host_llm_health_url(), timeout=timeout, process=proc, log_path=log_path)
 
 
 def _stop_host_llm() -> None:

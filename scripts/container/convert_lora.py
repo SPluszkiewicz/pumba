@@ -23,7 +23,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--base-model",
-        default=os.environ.get("TRAIN_BASE_MODEL", "/models/hf/Qwen2.5-7B-Instruct"),
+        default=os.environ.get("TRAIN_BASE_MODEL", "/models/hf/Mistral-Small-4-119B-2603"),
         help="Hugging Face base model directory",
     )
     parser.add_argument(

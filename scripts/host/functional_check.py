@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Exhaustive end-to-end functional verification against a running stack.
 
-Covers the 22 functional guarantees of the stack across all host doors
+Covers the 25 functional guarantees of the stack across all host doors
 (`127.0.0.1:8090`, `127.0.0.1:8092/mcp`, `127.0.0.1:8080`) and internal
-services (`agent`, `mcp`, `tools`, `patch`, `indexer`, `qdrant`, `embedder`,
+services (`agent`, `mcp`, `tools`, `indexer`, `qdrant`, `embedder`,
 `reranker`, `llm`):
 
   1.  Host doors health (`agent /health`, `GET /ui`, `mcp /health`, `llm /health`)
@@ -21,13 +21,16 @@ services (`agent`, `mcp`, `tools`, `patch`, `indexer`, `qdrant`, `embedder`,
   13. LSP outline (`src/calculator.hpp` symbols `CalcError` and `Evaluate`)
   14. LSP calls (`src/calculator.cpp:118:5` incoming callers from `calculator_test.cpp`)
   15. LSP types (`src/calculator.hpp:18:7` supertype `runtime_error` in `stdexcept`)
-  16. MCP Streamable HTTP (`POST :8092/mcp` `tools/list` + `tools/call` `lookup` and `outline`)
+  16. MCP Streamable HTTP (`POST :8092/mcp` `tools/list` + `tools/call` `lookup`, `calls`, and `types`)
   17. Chat — direct route (`2+2` answers without touching RAG)
   18. Chat — code route with citations (`Evaluate` declaration cites `src/calculator.hpp:23`)
   19. Chat — multi-turn memory (`conversation_id` remembers the previous turn)
   20. Chat — bounded judgment (`ask` style: `2+3*4` in `sample/` does not invent 14)
-  21. UI SSE stream (`POST /chat/stream` emits `meta`, `route`, `context`, `token`, `done`)
-  22. Working-copy overlay (`[working copy]` excerpt on uncommitted edit)
+  21. Chat — tool-calling loop (`list_dir` appears in `tool_calls`)
+  22. UI SSE stream (`POST /chat/stream` emits `meta`, `route`, `context`, `token`, `done`)
+  23. Working-copy overlay (`[working copy]` excerpt on uncommitted edit)
+  24. Concurrent lookups (two `/lookup` in parallel both return hits)
+  25. Prometheus `/metrics` (reachable through ui-proxy)
 """
 
 from __future__ import annotations
@@ -35,6 +38,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -342,7 +346,7 @@ def run_functional_checks(
 
     step("15. lsp types", _step_types)
 
-    # 16. MCP Streamable HTTP protocol (tools/list + all 6 tools: lookup, check, outline, calls, types, ask)
+    # 16. MCP Streamable HTTP protocol (tools/list + lookup, check, calls, types, ask)
     if mcp_client is not None:
         def _step_mcp_protocol() -> tuple[bool, str]:
             listed = _mcp_post(
@@ -352,7 +356,7 @@ def run_functional_checks(
             )
             tools = (listed.get("result") or {}).get("tools") or []
             names = {t.get("name") for t in tools if isinstance(t, dict)}
-            expected = {"lookup", "check", "outline", "calls", "types", "ask"}
+            expected = {"lookup", "check", "calls", "types", "ask"}
 
             def _call_mcp(req_id: int, tool_name: str, arguments: dict[str, Any]) -> str:
                 res = _mcp_post(
@@ -368,7 +372,6 @@ def run_functional_checks(
                 return ((res.get("result") or {}).get("content") or [{}])[0].get("text") or ""
 
             t_lookup = _call_mcp(2, "lookup", {"query": "où est déclarée Evaluate ?"})
-            t_outline = _call_mcp(3, "outline", {"path": "src/calculator.hpp"})
             t_calls = _call_mcp(4, "calls", {"path": "src/calculator.cpp", "line": 118, "character": 5})
             t_types = _call_mcp(5, "types", {"path": "src/calculator.hpp", "line": 18, "character": 7})
             t_check = _call_mcp(6, "check", {"action": "compile", "path": "src/calculator.cpp"})
@@ -376,15 +379,14 @@ def run_functional_checks(
             ok = (
                 expected <= names
                 and "src/calculator.hpp:23" in t_lookup
-                and "Evaluate function 23" in t_outline
                 and "tests/calculator_test.cpp:" in t_calls
                 and "runtime_error" in t_types
                 and "exit 0" in t_check
                 and "calculator.hpp" in t_ask
             )
-            return ok, f"all 6 MCP tools verified ({sorted(names)})"
+            return ok, f"all 5 MCP tools verified ({sorted(names)})"
 
-        step("16. MCP Streamable HTTP (all 6 tools)", _step_mcp_protocol)
+        step("16. MCP Streamable HTTP (all 5 tools)", _step_mcp_protocol)
 
     # 17. Chat direct route
     def _step_chat_direct() -> tuple[bool, str]:
@@ -476,7 +478,7 @@ def run_functional_checks(
             "/chat",
             json={
                 "query": (
-                    "Appelle l'outil list_files pour lister les fichiers du projet sample, "
+                    "Appelle l'outil list_dir pour lister les fichiers du projet sample, "
                     "puis donne la liste des fichiers trouvés."
                 )
             },
@@ -540,6 +542,33 @@ def run_functional_checks(
                 sample_header.write_text(original, encoding="utf-8")
 
         step("23. working copy overlay ([working copy])", _step_dirty)
+
+    # 24. Two lookups at once — the RAG path, not the /chat slot cap.
+    def _step_concurrent_lookup() -> tuple[bool, str]:
+        def _one() -> tuple[int, int]:
+            resp = client.post(
+                "/lookup",
+                json={"query": "où est déclarée Evaluate ?"},
+                headers=headers,
+            )
+            hits = resp.json().get("hits") or [] if resp.status_code == 200 else []
+            return resp.status_code, len(hits)
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            rows = list(pool.map(lambda _i: _one(), range(2)))
+        ok = all(status == 200 and count >= 1 for status, count in rows)
+        return ok, f"parallel={rows}"
+
+    step("24. concurrent lookups", _step_concurrent_lookup)
+
+    # 25. /metrics through the same host door as /ui.
+    def _step_metrics() -> tuple[bool, str]:
+        resp = client.get("/metrics")
+        text = resp.text or ""
+        ok = resp.status_code == 200 and ("http_request" in text or "python_info" in text)
+        return ok, f"status={resp.status_code} bytes={len(text)}"
+
+    step("25. /metrics", _step_metrics)
 
     return results
 

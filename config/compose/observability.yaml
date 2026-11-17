@@ -8,7 +8,10 @@
 #   podman compose -f compose.yaml -f state/compose.workspaces.yaml -f config/compose/observability.yaml --profile obs up -d prometheus grafana
 #
 # Do not publish agent or tools ports. Grafana is the only host-facing UI
-# (http://localhost:3000, admin/admin by default - change it).
+# and it binds loopback only (http://127.0.0.1:3000). Set
+# GRAFANA_ADMIN_PASSWORD in `.env` before the first start; Grafana keeps the
+# first password that initializes the volume. Usage, dashboards, and the
+# metric list: docs/guides/observability.md.
 
 networks:
   obs-net: {}
@@ -22,12 +25,13 @@ services:
     image: prom/prometheus:v2.55.1
     profiles: ["obs"]
     networks: [core-net, tools-net, obs-net]
+    environment:
+      - LLM_MODEL_PATH=${LLM_MODEL_PATH:-/models/Qwen2.5-Coder-14B-Instruct-Q5_K_M.gguf}
     volumes:
       - ./config/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./config/observability/prometheus-entrypoint.sh:/etc/prometheus/entrypoint.sh:ro
       - prometheus-data:/prometheus
-    command:
-      - --config.file=/etc/prometheus/prometheus.yml
-      - --storage.tsdb.path=/prometheus
+    entrypoint: ["/bin/sh", "/etc/prometheus/entrypoint.sh"]
     security_opt: ["no-new-privileges:true"]
     cap_drop: ["ALL"]
     restart: unless-stopped
@@ -37,10 +41,10 @@ services:
     profiles: ["obs"]
     networks: [obs-net]
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in .env}
       - GF_AUTH_ANONYMOUS_ENABLED=false
       - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/pumba.json
     volumes:

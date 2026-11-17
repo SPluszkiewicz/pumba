@@ -10,7 +10,9 @@ commands by hand.
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -124,6 +126,7 @@ def _no_real_podman(monkeypatch):
     """Only used by the cmd_* tests below - NOT by the _require_podman tests
     above, which need the real function to actually run."""
     monkeypatch.setattr(deploy, "_require_podman", lambda: None)
+    monkeypatch.setattr(deploy, "_wait_published_doors", lambda **_k: None)
 
 
 def _recorder(monkeypatch):
@@ -179,7 +182,7 @@ def test_host_profile_up_skips_the_llm_container(monkeypatch, _no_real_podman, t
     up = next(cmd for cmd in calls if "up" in cmd)
     assert "--no-deps" in up
     assert "llm" not in up
-    assert "patch" in up
+    assert "patch" not in up
     assert "agent" in up
 
 
@@ -193,7 +196,7 @@ def test_cmd_index(monkeypatch, _no_real_podman):
     calls = _recorder(monkeypatch)
     deploy.cmd_index(argparse.Namespace())
     assert calls == [
-        ["podman", "compose", "up", "-d", "--force-recreate", "--no-deps", "tools", "patch", "agent", "ui-proxy"],
+        ["podman", "compose", "up", "-d", "--force-recreate", "--no-deps", "tools", "agent", "ui-proxy"],
         ["podman", "compose", "--profile", "index", "run", "--rm", "indexer"],
     ]
 
@@ -269,6 +272,37 @@ def test_cmd_train_dry_run_builds_dataset_only(monkeypatch, tmp_path, _no_real_p
     assert not any("--profile train run" in c for c in joined)
 
 
+def test_cmd_test_starts_mcp_and_ui_proxy(monkeypatch, _no_real_podman):
+    calls = _recorder(monkeypatch)
+    waited: list[list[str]] = []
+    monkeypatch.setattr(deploy, "_wait_healthy", lambda services, timeout: waited.append(list(services)))
+
+    deploy.cmd_test(argparse.Namespace())
+
+    up = next(cmd for cmd in calls if "up" in cmd and "-d" in cmd)
+    for name in ("mcp", "ui-proxy"):
+        assert name in up
+        assert name in waited[0]
+    assert "patch" not in up
+    assert "patch" not in waited[0]
+    build = next(cmd for cmd in calls if "build" in cmd)
+    assert "patch" not in build
+
+
+def test_cmd_test_reads_env_test_not_operator_env(monkeypatch, _no_real_podman):
+    seen: list[str] = []
+
+    def wait(_services, timeout=180):
+        seen.append(str(deploy.ENV_FILE).replace("\\", "/"))
+
+    monkeypatch.setattr(deploy, "_wait_healthy", wait)
+    monkeypatch.setattr(deploy, "_run", lambda *_a, **_k: None)
+    previous = deploy.ENV_FILE
+    deploy.cmd_test(argparse.Namespace())
+    assert seen and seen[0].endswith(".env.test")
+    assert deploy.ENV_FILE == previous
+
+
 def test_cmd_test_always_tears_down_even_if_smoke_test_fails(monkeypatch, _no_real_podman):
     calls = []
 
@@ -342,7 +376,18 @@ def test_compose_env_normalizes_codebase_path_from_env_file(tmp_path, monkeypatc
 
 # --------------------------------------------------------------------------- GPU / CDI
 
-def test_compose_cmd_without_cpu_override(monkeypatch):
+def _repo_without_workspace_overlay(tmp_path, monkeypatch):
+    """`_compose_cmd` adds state/compose.workspaces.yaml only when that file exists.
+
+    The generated file is gitignored, so pinning REPO_ROOT keeps these tests
+    off the operator's local state.
+    """
+    monkeypatch.setattr(deploy, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(deploy, "_host_llm_selected", lambda: False)
+
+
+def test_compose_cmd_without_cpu_override(tmp_path, monkeypatch):
+    _repo_without_workspace_overlay(tmp_path, monkeypatch)
     monkeypatch.setattr(deploy, "_USE_CPU_COMPOSE_OVERRIDE", False)
     assert deploy._compose_cmd("build") == [
         "podman",
@@ -351,13 +396,22 @@ def test_compose_cmd_without_cpu_override(monkeypatch):
         "compose.yaml",
         "-f",
         "config/compose/podman.yaml",
-        "-f",
-        "state/compose.workspaces.yaml",
         "build",
     ]
 
 
-def test_compose_cmd_docker_layers_gpu_overlay(monkeypatch):
+def test_compose_cmd_includes_workspace_overlay_when_present(tmp_path, monkeypatch):
+    _repo_without_workspace_overlay(tmp_path, monkeypatch)
+    mounts = tmp_path / "state" / "compose.workspaces.yaml"
+    mounts.parent.mkdir()
+    mounts.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(deploy, "_USE_CPU_COMPOSE_OVERRIDE", False)
+    cmd = deploy._compose_cmd("build")
+    assert "state/compose.workspaces.yaml" in cmd
+
+
+def test_compose_cmd_docker_layers_gpu_overlay(tmp_path, monkeypatch):
+    _repo_without_workspace_overlay(tmp_path, monkeypatch)
     monkeypatch.setattr(deploy, "_RUNTIME", "docker")
     monkeypatch.setattr(deploy, "_USE_CPU_COMPOSE_OVERRIDE", False)
     assert deploy._compose_cmd("up", "-d") == [
@@ -367,14 +421,13 @@ def test_compose_cmd_docker_layers_gpu_overlay(monkeypatch):
         "compose.yaml",
         "-f",
         "config/compose/docker.yaml",
-        "-f",
-        "state/compose.workspaces.yaml",
         "up",
         "-d",
     ]
 
 
-def test_compose_cmd_docker_cpu_does_not_request_gpus(monkeypatch):
+def test_compose_cmd_docker_cpu_does_not_request_gpus(tmp_path, monkeypatch):
+    _repo_without_workspace_overlay(tmp_path, monkeypatch)
     monkeypatch.setattr(deploy, "_RUNTIME", "docker")
     monkeypatch.setattr(deploy, "_USE_CPU_COMPOSE_OVERRIDE", True)
     assert deploy._compose_cmd("build") == [
@@ -386,8 +439,6 @@ def test_compose_cmd_docker_cpu_does_not_request_gpus(monkeypatch):
         "config/compose/cpu.yaml",
         "-f",
         "config/compose/docker.cpu.yaml",
-        "-f",
-        "state/compose.workspaces.yaml",
         "build",
     ]
 
@@ -459,7 +510,8 @@ def test_prepare_gpu_on_docker_does_not_probe_cdi(monkeypatch):
     assert deploy._USE_CPU_COMPOSE_OVERRIDE is False
 
 
-def test_compose_cmd_with_cpu_override(monkeypatch):
+def test_compose_cmd_with_cpu_override(tmp_path, monkeypatch):
+    _repo_without_workspace_overlay(tmp_path, monkeypatch)
     monkeypatch.setattr(deploy, "_USE_CPU_COMPOSE_OVERRIDE", True)
     assert deploy._compose_cmd("up", "-d", "llm") == [
         "podman",
@@ -470,8 +522,6 @@ def test_compose_cmd_with_cpu_override(monkeypatch):
         "config/compose/cpu.yaml",
         "-f",
         "config/compose/podman.yaml",
-        "-f",
-        "state/compose.workspaces.yaml",
         "up",
         "-d",
         "llm",
@@ -612,7 +662,9 @@ def test_gpu_profiles_cover_the_vram_and_model_cases():
     assert deploy._parse_env_file(deploy.GPU_PROFILE_DIR / "48g.env")["LLM_CACHE_TYPE_K"] == "f16"
     assert deploy._parse_env_file(deploy.GPU_PROFILE_DIR / "24g-30b.env")["LLM_GPU_MARGIN_MIB"] == "512"
     assert deploy._parse_env_file(deploy.GPU_PROFILE_DIR / "16g.env")["EMBEDDER_GPU_ARG"] == "0"
-    assert set(deploy.PROFILE_EXTRA) == {"24g-30b", "48g-30b", "48g-32b", "evo-x5"}
+    assert model("16g-gptoss").endswith("gpt-oss-20b-MXFP4.gguf")
+    assert deploy._parse_env_file(deploy.GPU_PROFILE_DIR / "16g-gptoss.env")["EMBEDDER_GPU_ARG"] == "0"
+    assert set(deploy.PROFILE_EXTRA) == {"16g-gptoss", "24g-30b", "48g-30b", "48g-32b", "evo-x5"}
     evo = deploy._parse_env_file(deploy.GPU_PROFILE_DIR / "evo-x5.env")
     assert evo["LLM_SERVE"] == "host"
     assert evo["LLM_GPU_ARG"] == "0"
@@ -620,9 +672,13 @@ def test_gpu_profiles_cover_the_vram_and_model_cases():
     assert evo["LLM_CTX_SIZE"] == "262144"
     assert evo["AGENT_CONTEXT_BUDGET_TOKENS"] == "262144"
     assert evo["LLM_BASE_URL"] == "http://host.containers.internal:8080"
+    assert evo["EMBEDDER_GPU_ARG"] == "0"
+    assert evo["EMBEDDER_NGL"] == "0"
+    assert evo["RERANKER_NGL"] == "0"
     assert deploy._parse_env_file(deploy.GPU_PROFILE_DIR / "16g.env")["LLM_BASE_URL"] == "http://llm:8080"
     assert deploy._parse_env_file(deploy.GPU_PROFILE_DIR / "16g.env")["LLM_SERVE"] == "container"
     assert "00001-of-00003" in evo["LLM_MODEL_PATH"]
+    assert evo["TRAIN_BASE_MODEL"] == "/models/hf/Mistral-Small-4-119B-2603"
 
 
 def test_codebase_path_exists_accepts_relative_repo_path(tmp_path, monkeypatch):
@@ -636,6 +692,7 @@ def test_codebase_path_exists_accepts_relative_repo_path(tmp_path, monkeypatch):
 def test_needs_container_engine_skips_host_only_commands():
     assert deploy._needs_container_engine(["export"]) is False
     assert deploy._needs_container_engine(["gpu-profile", "evo-x5"]) is False
+    assert deploy._needs_container_engine(["check"]) is False
     assert deploy._needs_container_engine(["-h"]) is False
     assert deploy._needs_container_engine([]) is False
     assert deploy._needs_container_engine(["up"]) is True
@@ -647,6 +704,7 @@ def test_activate_runtime_skips_engine_for_export(monkeypatch):
     monkeypatch.setattr(deploy, "_engine_probe", lambda name: probed.append(name) or (False, "no"))
     deploy._activate_runtime(["export"])
     deploy._activate_runtime(["gpu-profile", "evo-x5"])
+    deploy._activate_runtime(["check"])
     assert probed == []
 
 
@@ -666,6 +724,15 @@ def test_wsl_distro_ready_false_when_wsl_missing(monkeypatch):
     ok, detail = deploy._wsl_distro_ready("local-llm")
     assert ok is False
     assert "PATH" in detail
+
+
+def test_wsl_distro_ready_true_when_probe_succeeds(monkeypatch):
+    monkeypatch.setattr(deploy.shutil, "which", lambda _n: "wsl")
+    monkeypatch.setattr(
+        subprocess, "run", lambda *_a, **_k: SimpleNamespace(returncode=0, stdout="", stderr="")
+    )
+    ok, detail = deploy._wsl_distro_ready("local-llm")
+    assert (ok, detail) == (True, "")
 
 
 def test_cmd_up_indexer_failure_leaves_stack_up(monkeypatch, _no_real_podman):
@@ -733,8 +800,200 @@ def test_wait_http_exits_when_process_dies(monkeypatch):
         deploy._wait_http("http://127.0.0.1:8080/health", timeout=5, process=SimpleNamespace(poll=lambda: 1))
 
 
+def test_health_from_compose_ps_prefers_json_service_field():
+    payload = "\n".join(
+        [
+            '{"Service":"qdrant","Health":"healthy","State":"running"}',
+            '{"Service":"llm","Health":"unhealthy","State":"running"}',
+            '{"Service":"embedder","Health":"starting","State":"running"}',
+            '{"Service":"tools","State":"running","Status":"Up 3 minutes"}',
+        ]
+    )
+    statuses = deploy._health_from_compose_ps(
+        payload, ["qdrant", "llm", "embedder", "tools", "agent"]
+    )
+    assert statuses == {
+        "qdrant": "healthy",
+        "llm": "unhealthy",
+        "embedder": "starting",
+        "tools": "unknown",
+        "agent": "not_found",
+    }
+
+
+def test_health_from_compose_ps_falls_back_to_table_text():
+    output = f"{product.COMPOSE_PROJECT}-agent-1  Up 1 minute (healthy)"
+    statuses = deploy._health_from_compose_ps(output, ["agent", "qdrant"])
+    assert statuses["agent"] == "healthy"
+    assert statuses["qdrant"] == "not_found"
+
+
+def test_fetch_weights_explains_how_to_resume(monkeypatch):
+    monkeypatch.setattr(
+        deploy,
+        "_run",
+        lambda *_a, **_k: (_ for _ in ()).throw(subprocess.CalledProcessError(1, ["fetch"])),
+    )
+    with pytest.raises(SystemExit, match="--skip-models"):
+        deploy._fetch_weights(host=False)
+
+
+def test_start_host_llm_can_spawn_without_waiting(monkeypatch, tmp_path):
+    monkeypatch.setattr(deploy, "HOST_LLM_PID", tmp_path / "host-llm.pid")
+    binary = str(tmp_path / "llama-server")
+    monkeypatch.setattr("evo_x5_serve.ensure_binary", lambda *_a, **_k: binary)
+    seen: dict[str, list[str]] = {}
+
+    class _Proc:
+        pid = 7
+
+        def poll(self):
+            return None
+
+    def fake_popen(argv, **_kwargs):
+        seen["argv"] = argv
+        return _Proc()
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+    waited: list[str] = []
+    monkeypatch.setattr(deploy, "_wait_http", lambda url, **k: waited.append(url))
+    deploy._start_host_llm(timeout=12, wait=False)
+    assert waited == []
+    assert seen["argv"][seen["argv"].index("--binary") + 1] == binary
+    assert (tmp_path / "host-llm.pid").read_text(encoding="utf-8") == "7"
+
+
+def test_wait_published_doors_hits_loopback_health(monkeypatch, tmp_path):
+    env = tmp_path / ".env"
+    env.write_text("AGENT_PORT=8090\nLLM_SERVE=host\nLLM_PORT=8080\n", encoding="utf-8")
+    monkeypatch.setattr(deploy, "ENV_FILE", env)
+    seen: list[tuple[str, int]] = []
+    monkeypatch.setattr(
+        deploy, "_wait_http", lambda url, **k: seen.append((url, k.get("timeout")))
+    )
+    deploy._wait_published_doors(host=True, timeout=30)
+    assert seen[0][0] == "http://127.0.0.1:8090/health"
+    assert seen[1] == ("http://127.0.0.1:8080/health", max(30, deploy.HOST_LLM_READY_TIMEOUT))
+
+
+def test_wait_published_doors_skips_llama_when_not_host(monkeypatch, tmp_path):
+    env = tmp_path / ".env"
+    env.write_text("AGENT_PORT=8090\n", encoding="utf-8")
+    monkeypatch.setattr(deploy, "ENV_FILE", env)
+    seen: list[str] = []
+    monkeypatch.setattr(deploy, "_wait_http", lambda url, **k: seen.append(url))
+    deploy._wait_published_doors(host=False, timeout=30)
+    assert seen == ["http://127.0.0.1:8090/health"]
+
+
+def test_health_from_compose_ps_accepts_json_array():
+    payload = json.dumps(
+        [
+            {"Service": "agent", "Health": "healthy", "State": "running"},
+            {"Service": "ui-proxy", "Health": "healthy", "State": "running"},
+        ]
+    )
+    statuses = deploy._health_from_compose_ps(payload, ["agent", "ui-proxy", "qdrant"])
+    assert statuses == {"agent": "healthy", "ui-proxy": "healthy", "qdrant": "not_found"}
+
+
+def test_health_from_compose_ps_reads_compose_service_label():
+    payload = json.dumps(
+        {
+            "Labels": "com.docker.compose.service=agent,com.docker.compose.project=pumba",
+            "Health": "healthy",
+            "State": "running",
+        }
+    )
+    statuses = deploy._health_from_compose_ps(payload, ["agent"])
+    assert statuses["agent"] == "healthy"
+
+
+def test_compose_ps_payload_falls_back_when_format_json_fails(monkeypatch):
+    def fake_run(cmd, **_k):
+        if "--format" in cmd:
+            return SimpleNamespace(returncode=1, stdout="", stderr="unknown flag")
+        return SimpleNamespace(returncode=0, stdout="plain-table", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(deploy, "_compose_cmd", lambda *parts: ["podman", "compose", *parts])
+    monkeypatch.setattr(deploy, "_compose_env", lambda: {})
+    code, out, err = deploy._compose_ps_payload()
+    assert (code, out, err) == (0, "plain-table", "")
+
+
+def test_fetch_weights_evo_failure_points_at_fetch_extra(monkeypatch):
+    monkeypatch.setattr(deploy, "_run", lambda *_a, **_k: None)
+    monkeypatch.setattr(deploy, "_host_llm_weights_missing", lambda: [Path("missing.gguf")])
+    monkeypatch.setattr(
+        deploy,
+        "cmd_fetch_extra",
+        lambda *_a, **_k: (_ for _ in ()).throw(subprocess.CalledProcessError(1, ["fetch-extra"])),
+    )
+    with pytest.raises(SystemExit, match="fetch-extra evo-x5"):
+        deploy._fetch_weights(host=True)
+
+
+def test_cmd_up_waits_published_doors_and_ui_proxy(monkeypatch, _no_real_podman):
+    doors: list[dict] = []
+    waited: list[list[str]] = []
+    monkeypatch.setattr(deploy, "_run", lambda *_a, **_k: None)
+    monkeypatch.setattr(deploy, "_ensure_env_file", lambda: None)
+    monkeypatch.setattr(deploy, "_require_bind_source", lambda: None)
+    monkeypatch.setattr(deploy, "_prepare_gpu_for_up", lambda _env: None)
+    monkeypatch.setattr(deploy, "_compose_build_and_up", lambda host=False: None)
+    monkeypatch.setattr(deploy, "_wait_healthy", lambda services, timeout: waited.append(list(services)))
+    monkeypatch.setattr(deploy, "_wait_published_doors", lambda **k: doors.append(k))
+
+    deploy.cmd_up(argparse.Namespace(skip_models=True, skip_index=True, timeout=40))
+
+    assert waited[0][-1] == "ui-proxy"
+    assert "llm" in waited[0]
+    assert doors == [{"host": False, "timeout": 40}]
+
+
+def test_host_up_spawns_llama_then_waits_on_doors(monkeypatch, _no_real_podman, tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text("LLM_SERVE=host\n", encoding="utf-8")
+    monkeypatch.setattr(deploy, "ENV_FILE", env_file)
+    started: list[dict] = []
+    doors: list[dict] = []
+    monkeypatch.setattr(deploy, "_run", lambda *_a, **_k: None)
+    monkeypatch.setattr(deploy, "_ensure_env_file", lambda: None)
+    monkeypatch.setattr(deploy, "_require_bind_source", lambda: None)
+    monkeypatch.setattr(deploy, "_prepare_gpu_for_up", lambda _env: None)
+    monkeypatch.setattr(deploy, "_require_host_llm_weights", lambda: None)
+    monkeypatch.setattr(deploy, "_compose_build_and_up", lambda host=False: None)
+    monkeypatch.setattr(deploy, "_start_host_llm", lambda **k: started.append(k))
+    monkeypatch.setattr(deploy, "_wait_published_doors", lambda **k: doors.append(k))
+    waited: list[list[str]] = []
+    monkeypatch.setattr(deploy, "_wait_healthy", lambda services, timeout: waited.append(list(services)))
+
+    deploy.cmd_up(argparse.Namespace(skip_models=True, skip_index=True, timeout=5))
+
+    assert started == [{"timeout": deploy.HOST_LLM_READY_TIMEOUT, "wait": False}]
+    assert doors == [{"host": True, "timeout": 5}]
+    assert "llm" not in waited[0]
+    assert waited[0][-1] == "ui-proxy"
+
+
+def test_wait_http_times_out(monkeypatch):
+    import urllib.error
+
+    now = {"t": 0.0}
+    monkeypatch.setattr(deploy.time, "monotonic", lambda: now["t"])
+    monkeypatch.setattr(deploy.time, "sleep", lambda s: now.__setitem__("t", now["t"] + s))
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda *_a, **_k: (_ for _ in ()).throw(urllib.error.URLError("refused")),
+    )
+    with pytest.raises(SystemExit, match="not ready"):
+        deploy._wait_http("http://127.0.0.1:8090/health", timeout=2)
+
+
 def test_start_host_llm_waits_for_health(monkeypatch, tmp_path):
     monkeypatch.setattr(deploy, "HOST_LLM_PID", tmp_path / "host-llm.pid")
+    monkeypatch.setattr("evo_x5_serve.ensure_binary", lambda *_a, **_k: "llama-server")
 
     class _Proc:
         pid = 4242

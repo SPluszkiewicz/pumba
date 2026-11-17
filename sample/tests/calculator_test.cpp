@@ -2,6 +2,14 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+TEST_CASE("ten modulo three is one") {
+    REQUIRE(calc::Evaluate("10%3") == 1);
+}
+
+TEST_CASE("modulo by zero is an error") {
+    REQUIRE_THROWS_AS(calc::Evaluate("10%0"), calc::CalcError);
+}
+
 TEST_CASE("single number") {
     REQUIRE(calc::Evaluate("42") == 42);
 }

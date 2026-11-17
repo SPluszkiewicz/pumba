@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""QLoRA fine-tune Qwen2.5-7B-Instruct on a JSONL chat dataset.
+"""QLoRA fine-tune Mistral Small 4 on a JSONL chat dataset.
 
 Runs inside the `trainer` compose profile (GPU). Reads the latest dataset
 under TRAIN_DATASET_DIR or models/training/{commit}/dataset.jsonl, writes
@@ -91,7 +91,7 @@ def _convert_lora_to_gguf(
 
 
 def main() -> int:
-    base_model = Path(os.environ.get("TRAIN_BASE_MODEL", "/models/hf/Qwen2.5-7B-Instruct"))
+    base_model = Path(os.environ.get("TRAIN_BASE_MODEL", "/models/hf/Mistral-Small-4-119B-2603"))
     adapter_out = Path(os.environ.get("TRAIN_ADAPTER_OUT", "/models/adapters"))
     dataset_dir = Path(os.environ.get("TRAIN_DATASET_DIR", "/models/training"))
     source_root = Path(os.environ.get("TRAIN_SOURCE_ROOT", "/workspace/app"))

@@ -44,11 +44,15 @@ class _Store:
     def listed_file_hashes(self) -> dict[str, str]:
         return dict(self.hashes)
 
-    def delete_by_file_paths(self, paths: list[str]) -> int:
+    def delete_by_file_paths(self, paths: list[str], *, git_blob_hash: str | None = None) -> int:
         self.deleted.append(list(paths))
         for path in paths:
-            self.hashes.pop(path, None)
+            if git_blob_hash is None or self.hashes.get(path) == git_blob_hash:
+                self.hashes.pop(path, None)
         return len(paths)
+
+    def persist_checkouts(self, updates) -> int:
+        return len(updates)
 
     def attach_checkouts(self, pairs, snapshot=None) -> int:
         self.attached.extend(list(pairs))
@@ -94,6 +98,22 @@ def test_changed_file_is_reindexed_after_deleting_old_points(tree: Path, monkeyp
     assert stats["files_indexed"] >= 1
     assert "src/keep.cpp" in store.upserted
     assert any("src/keep.cpp" in batch for batch in store.deleted)
+
+
+def test_embed_failure_keeps_existing_points(tree: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    store = _Store({"src/keep.cpp": "old-hash-not-matching"})
+    monkeypatch.setattr(
+        embeddings_client,
+        "embed_texts",
+        lambda *_a, **_k: (_ for _ in ()).throw(embeddings_client.EmbedderError("embedder down")),
+    )
+
+    stats = indexer_main.index_source_root(tree, store)
+
+    assert stats["errors"] == 1
+    assert store.deleted == []
+    assert store.upserted == []
+    assert store.hashes["src/keep.cpp"] == "old-hash-not-matching"
 
 
 def test_new_file_is_indexed_without_a_prior_delete(tree: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -167,3 +187,20 @@ def test_shared_tree_attaches_in_one_call_without_embedding(
     assert len(store.attached) == 12
     assert set(store.attached) == set(blobs.items())
     assert store.upserted == []
+
+
+def test_matching_blob_detaches_stale_hashes(tree: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    keep = tree / "src" / "keep.cpp"
+    blob = chunker.compute_blob_hash(keep.read_bytes(), tree)
+    store = _Store({"src/keep.cpp": blob})
+    monkeypatch.setattr(
+        embeddings_client,
+        "embed_texts",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("must not re-embed")),
+    )
+    chunk_count, outcome, _ = indexer_main.process_file(
+        keep, tree, store, known_hash={blob, "stale-blob"}
+    )
+    assert outcome == "skipped"
+    assert chunk_count == 0
+    assert store.deleted == [["src/keep.cpp"]]

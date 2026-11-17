@@ -3,7 +3,7 @@
 import os
 
 import uvicorn
-from server import mcp, workspace_header
+from server import client_header, mcp, workspace_header
 
 
 class WorkspaceHeader:
@@ -17,15 +17,20 @@ class WorkspaceHeader:
             await self.app(scope, receive, send)
             return
         raw = ""
+        caller = ""
         for key, value in scope.get("headers") or []:
-            if key.lower() == b"x-workspace":
+            lowered = key.lower()
+            if lowered == b"x-workspace":
                 raw = value.decode("utf-8", errors="replace").strip()
-                break
-        token = workspace_header.set(raw)
+            elif lowered == b"x-client":
+                caller = value.decode("utf-8", errors="replace").strip()
+        workspace_token = workspace_header.set(raw)
+        client_token = client_header.set(caller)
         try:
             await self.app(scope, receive, send)
         finally:
-            workspace_header.reset(token)
+            client_header.reset(client_token)
+            workspace_header.reset(workspace_token)
 
 
 def main() -> None:

@@ -39,6 +39,8 @@ Usage (from the repo root):
     python scripts/deploy.py doctor --html doctor-report.html
     python scripts/deploy.py rotate-token
     python scripts/deploy.py export          # zip the repo without models/logs/state
+    python scripts/deploy.py expose --allow 192.168.1.40
+    python scripts/deploy.py expose --down
     python scripts/deploy.py down
     python scripts/deploy.py down --volumes
 """
@@ -52,7 +54,12 @@ def main() -> int:
     up = subparsers.add_parser("up", help="fetch models, build, start, wait healthy, index")
     up.add_argument("--skip-models", action="store_true", help="skip the fetch-models step")
     up.add_argument("--skip-index", action="store_true", help="skip running the indexer")
-    up.add_argument("--timeout", type=int, default=300, help="seconds to wait for health (default 300)")
+    up.add_argument(
+        "--timeout",
+        type=int,
+        default=300,
+        help="seconds to wait for compose health and ui-proxy (default 300; host llama waits at least 900)",
+    )
     up.set_defaults(func=d.cmd_up)
 
     down = subparsers.add_parser("down", help="stop the stack")
@@ -155,7 +162,7 @@ def main() -> int:
     ).set_defaults(func=d.cmd_test)
 
     check_cmd = subparsers.add_parser(
-        "check", help="run the 9-step functional check suite against the running stack"
+        "check", help="run the live functional check suite against the running stack"
     )
     check_cmd.add_argument("--agent", default="http://127.0.0.1:8090", help="agent base URL")
     check_cmd.add_argument("--workspace", default=None, help="registered workspace path (default: sample/)")
@@ -185,7 +192,7 @@ def main() -> int:
 
     fetch_extra = subparsers.add_parser(
         "fetch-extra",
-        help="download the optional GGUF for 24g-30b, 48g-30b, 48g-32b, or evo-x5",
+        help="download the optional GGUF for 16g-gptoss, 24g-30b, 48g-30b, 48g-32b, or evo-x5",
     )
     fetch_extra.add_argument("name", choices=tuple(d.PROFILE_EXTRA))
     fetch_extra.set_defaults(func=d.cmd_fetch_extra)
@@ -211,6 +218,29 @@ def main() -> int:
         help="also pack .env and atlassian.env (secrets). Default is to omit them.",
     )
     export_cmd.set_defaults(func=d.cmd_export)
+
+    expose_cmd = subparsers.add_parser(
+        "expose",
+        help="forward page, model, MCP, and Grafana to allowlisted machines",
+    )
+    expose_cmd.add_argument(
+        "--allow",
+        action="append",
+        default=[],
+        metavar="IP",
+        help="IPv4 allowed to connect. Repeatable. Also read from state/expose-allow.txt",
+    )
+    expose_cmd.add_argument(
+        "--bind",
+        default="",
+        help="LAN IPv4 to listen on (default: the address of the default route)",
+    )
+    expose_cmd.add_argument(
+        "--down",
+        action="store_true",
+        help="remove the Windows firewall rules and exit",
+    )
+    expose_cmd.set_defaults(func=d.cmd_expose)
 
     args = parser.parse_args()
     try:

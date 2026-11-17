@@ -17,9 +17,9 @@ from services.tools.handlers.build import run_cmake_pipeline
 
 __all__ = ["run_test", "TestFilterError"]
 
-# Catch2 / ctest names and simple regex metacharacters. No `$()` / spaces /
-# options - even though we never use a shell, keep the filter boring.
-_FILTER = re.compile(r"^[A-Za-z0-9_.:*?+|\\^-]+$")
+# Catch2 names contain spaces. The value is one argv element of `ctest -R`,
+# never a shell string. `$()` and leading options stay rejected.
+_FILTER = re.compile(r"^[A-Za-z0-9_.:*?+|\\^ -]+$")
 
 
 class TestFilterError(ValueError):
@@ -30,7 +30,7 @@ def validate_filter(raw: Optional[str]) -> Optional[str]:
     if raw is None or not str(raw).strip():
         return None
     value = str(raw).strip()
-    if not _FILTER.match(value):
+    if value.startswith("-") or not _FILTER.match(value):
         raise TestFilterError(f"invalid ctest filter {raw!r}")
     return value
 
@@ -38,7 +38,7 @@ def validate_filter(raw: Optional[str]) -> Optional[str]:
 def _ctest_argv(build_dir: Path, filt: Optional[str] = None) -> list[str]:
     # `--test-dir` (CMake >= 3.20, well below the 3.28 in ubuntu:24.04) lets ctest
     # target an out-of-source build dir without needing a `cd`.
-    argv = ["ctest", "--test-dir", str(build_dir), "--output-on-failure"]
+    argv = ["ctest", "--test-dir", str(build_dir), "--output-on-failure", "--no-tests=error"]
     if filt:
         argv.extend(["-R", filt])
     return argv

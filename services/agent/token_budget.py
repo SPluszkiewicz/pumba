@@ -6,6 +6,7 @@ import json
 import os
 from typing import Any
 
+from journal import VERIFY_TOOLS
 from llm_client import count_tokens
 
 # Default per CONTRACTS.md (compose passes the same value explicitly).
@@ -58,12 +59,54 @@ def _summarize_tool_message(message: dict[str, Any]) -> dict[str, Any]:
     except json.JSONDecodeError:
         body = {}
     if isinstance(body, dict):
-        ok = body.get("ok")
+        ok = body.get("ok") is True
         err = (body.get("stderr") or body.get("stdout") or "")[:120]
         text = f"tool result collapsed ({'ok' if ok else 'failed'}): {err}"
     else:
-        text = "tool result collapsed"
+        text = "tool result collapsed (failed): "
     return {**message, "content": text}
+
+
+def _tool_body(message: dict[str, Any]) -> dict[str, Any]:
+    raw = message.get("content") or ""
+    try:
+        body = json.loads(raw) if isinstance(raw, str) else raw
+    except json.JSONDecodeError:
+        return {}
+    return body if isinstance(body, dict) else {}
+
+
+def _fit_protected(message: dict[str, Any]) -> dict[str, Any]:
+    """Keep ok, repair, then three quarters of the log head and one quarter of its tail."""
+    body = _tool_body(message)
+    repair = body.get("repair")
+    repair_text = "" if repair is None else json.dumps(repair, ensure_ascii=False)
+    if len(repair_text) > 200:
+        repair_text = repair_text[:200]
+    prefix = f"ok={body.get('ok')} repair={repair_text} "
+    journal = body.get("stderr") or body.get("stdout") or ""
+    if not isinstance(journal, str):
+        journal = str(journal)
+    budget = 2000 - len(prefix)
+    if budget <= 0:
+        text = prefix[:2000]
+    elif len(journal) <= budget:
+        text = prefix + journal
+    else:
+        head_len = (budget * 3) // 4
+        tail_len = budget // 4
+        head_len += budget - head_len - tail_len
+        tail = journal[-tail_len:] if tail_len else ""
+        text = prefix + journal[:head_len] + tail
+    return {**message, "content": text[:2000]}
+
+
+def _last_protected(messages: list[dict[str, Any]]) -> int | None:
+    found: int | None = None
+    for index, message in enumerate(messages):
+        if message.get("role") == "tool" and message.get("name") in VERIFY_TOOLS:
+            found = index
+    return found
 
 
 def _shorten(text: str, limit: int) -> str:
@@ -78,6 +121,7 @@ def _shorten(text: str, limit: int) -> str:
 _SUMMARY_SYSTEM = (
     "Summarize this earlier coding-assistant conversation for the next turn. "
     "Keep file paths, symbols, decisions, errors, and tool outcomes. "
+    "Keep the last trace line: tool name, ok, and path or target. "
     "Drop greetings and repeated text. Plain prose, under 600 words."
 )
 
@@ -164,13 +208,44 @@ async def apply_budget(
     if tokens <= limit:
         return current, tokens, usage_snapshot(tokens, compressed=False)
 
-    for index, message in enumerate(current):
-        if message.get("role") == "tool" and len(str(message.get("content") or "")) > 160:
-            current[index] = _summarize_tool_message(message)
+    protected = _last_protected(current)
+
+    while tokens > limit:
+        unprotected = [
+            index
+            for index, message in enumerate(current)
+            if message.get("role") == "tool" and index != protected and message.get("name") not in VERIFY_TOOLS
+        ]
+        older_protected = [
+            index
+            for index, message in enumerate(current)
+            if message.get("role") == "tool" and message.get("name") in VERIFY_TOOLS and index != protected
+        ]
+        collapsed_one = False
+        for index in unprotected + older_protected:
+            if len(str(current[index].get("content") or "")) <= 160:
+                continue
+            current[index] = _summarize_tool_message(current[index])
+            compressed = True
+            collapsed_one = True
+            tokens = await message_tokens(http_client, current, request_id)
+            if tokens <= limit:
+                return current, tokens, usage_snapshot(tokens, compressed=True)
+            break
+        if collapsed_one:
+            continue
+        if (
+            protected is not None
+            and len(str(current[protected].get("content") or "")) > 2000
+        ):
+            current[protected] = _fit_protected(current[protected])
             compressed = True
             tokens = await message_tokens(http_client, current, request_id)
             if tokens <= limit:
                 return current, tokens, usage_snapshot(tokens, compressed=True)
+            protected = None
+            continue
+        break
 
     head = current[0] if current and current[0].get("role") == "system" else None
     tail = current[-1]

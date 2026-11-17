@@ -32,6 +32,39 @@ def test_every_contract_env_is_in_env_example() -> None:
     assert missing <= allowed_gap, f"in CONTRACTS.md but not .env.example: {sorted(missing - allowed_gap)}"
 
 
+def _assignment_map(text: str) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or line.startswith("|") or "=" not in line:
+            continue
+        key, _, rest = line.partition("=")
+        if not re.fullmatch(r"[A-Z][A-Z0-9_]+", key):
+            continue
+        values[key] = rest.split("#", 1)[0].strip()
+    return values
+
+
+def test_shared_env_values_match_between_contracts_and_example() -> None:
+    contracts = _assignment_map((REPO / "CONTRACTS.md").read_text(encoding="utf-8"))
+    example = _assignment_map((REPO / ".env.example").read_text(encoding="utf-8"))
+    keys = (
+        "EMBEDDER_GPU_ARG",
+        "EMBEDDER_NGL",
+        "RERANKER_NGL",
+        "QDRANT_COLLECTION",
+        "AGENT_MAX_CONCURRENT",
+        "INDEXER_CHECKOUT_ID",
+        "GRAFANA_ADMIN_PASSWORD",
+    )
+    missing = [key for key in keys if key not in contracts or key not in example]
+    assert missing == [], missing
+    mismatched = [
+        (key, contracts[key], example[key]) for key in keys if contracts[key] != example[key]
+    ]
+    assert mismatched == [], mismatched
+
+
 def test_service_env_vars_appear_in_compose() -> None:
     compose = _compose_mentions()
     required = {

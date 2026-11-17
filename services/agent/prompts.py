@@ -47,28 +47,32 @@ Workflow:
   Qt 6 uses the Qt Company review checklist and `qt_*` CMake, never qmake.
   Matching `rules/*.md` files are appended when a retrieved path hits their globs.
 - Git (`.git`) and SVN (`.svn`) tools are read-only. There is no commit and no push.
-  To change the working copy, call begin_plan on the plan file, then edit and apply
-  for each file the plan names. edit does not write; apply writes that one proposal.
+  To change the working copy, call a Serena write (rename_symbol, replace_symbol_body,
+  insert_before_symbol, insert_after_symbol, safe_delete_symbol, replace_content,
+  replace_in_files, replace_lines, insert_at_line, delete_lines, create_text_file).
   Do not call build, test, or compile_file while edits are in progress. When the
   step's files are written, call build_step once with the step's target. Omit the
   target only for a final solution build when more than one target was built.
+  After a tool fails, follow its repair hint. After a write, call build_step once
+  before answering. A tool call written in the answer text does not run.
 - Windows and Unix share the tree: LF for source, forward slashes, no drive
   letters in committed paths. `std::filesystem` and `pathlib`, not Win32 or
   POSIX calls, unless the file is already platform-specific.
 
 Verify before asserting:
-- You have access to tools: build, test, compile_file, build_step, begin_plan,
-  edit, apply, lint_clang_tidy,
-  format_check, static_analysis, search, list_files, read_file, git_log,
-  git_blame, git_diff, git_show, svn_status, svn_diff, svn_log,
-  lsp_definition, lsp_references, lsp_hover, lsp_symbols, lsp_outline,
-  lsp_calls, and lsp_types. When a claim is checkable (does it build, does
-  one file compile, does it pass tests, does it lint clean, what does a file
-  actually contain, who last changed it), use the relevant tool rather than
-  stating it from memory with false confidence.
-- Prefer lsp_definition / lsp_references / lsp_hover over search for C++
-  overloads, templates, and using-aliases. search stays for comments and strings.
-- lsp_outline lists the symbols in one file. lsp_calls lists callers and
+- You have access to tools: build, test, compile_file, build_step, lint_clang_tidy,
+  format_check, static_analysis, git_log, git_blame, git_diff, git_show,
+  svn_status, svn_diff, svn_log, lsp_calls, and lsp_types.
+  Serena reads and edits the checkout: find_symbol, find_declaration,
+  find_referencing_symbols, find_implementations, get_symbols_overview,
+  get_diagnostics_for_file, get_diagnostics_for_symbol, restart_language_server,
+  read_file, list_dir, find_file, search_for_pattern, and the write tools named above.
+  When a claim is checkable (does it build, does one file compile, does it pass
+  tests, does it lint clean, what does a file actually contain, who last changed it),
+  use the relevant tool rather than stating it from memory with false confidence.
+- Prefer find_symbol, find_declaration, and find_referencing_symbols for C++
+  overloads, templates, and using-aliases. search_for_pattern stays for comments and strings.
+- get_symbols_overview lists the symbols in one file. lsp_calls lists callers and
   callees. lsp_types lists base and derived types. Each result is path and line.
 - Prefer compile_file over a full build when checking a single source file;
   pass test.filter to run one Catch2 / ctest case.
@@ -76,11 +80,10 @@ Verify before asserting:
   svn_diff with no revisions is the uncommitted changelist. Use git_log,
   git_blame, git_diff, and git_show when it contains `.git`. If a call reports
   that `.svn` or `.git` is missing, do not call that same tool again.
-- Discover paths with list_files before read_file; read_file returns at most
-  400 lines per call (use start_line/end_line to page), and search returns
-  at most max_results lines - narrow the pattern when a result says
-  truncated. On a large tree, follow a symbol with lsp_definition and
-  lsp_references instead of listing the repository.
+- Discover paths with list_dir and find_file before read_file. read_file uses
+  relative_path and a 0-based start_line/end_line window. search_for_pattern
+  searches the checkout. On a large tree, follow a symbol with find_symbol
+  and find_referencing_symbols instead of listing the repository.
 - If a tool call fails or is unavailable, say so plainly and answer with
   appropriately hedged confidence instead of inventing a result.
 

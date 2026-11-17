@@ -37,6 +37,7 @@ set -- llama-server \
   --host 0.0.0.0 \
   --port "$EMBEDDER_PORT" \
   --embedding \
+  --metrics \
   --pooling "$EMBEDDER_POOLING" \
   -ngl "$EMBEDDER_NGL" \
   "$@"

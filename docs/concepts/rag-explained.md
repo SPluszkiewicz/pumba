@@ -1,6 +1,6 @@
 # RAG, explained
 
-The plain-language version is [Comprendre sans bagage](en-clair.md).
+The plain-language version is [Plain-language overview](en-clair.md).
 This page is the mechanism.
 
 Retrieval-Augmented Generation (RAG) is how the `agent` service answers
@@ -18,7 +18,7 @@ it. Two ways to fix that:
 2. **Retrieval-augmented generation**: at query time, fetch the handful of
    code snippets that are actually relevant to the question and paste them
    into the model's context window alongside the question. No training, no
-   staleness beyond "when did we last re-index" - which for this project is
+   staleness beyond "when did we last re-index", which for this project is
    "whenever `indexer` runs" (see [Indexing pipeline](indexing-pipeline.md)).
 
 This project uses (2). It's cheap, it updates as fast as re-indexing, and it
@@ -61,12 +61,12 @@ Retrieval runs only on `route: code`. A calculation or a greeting is
 `direct`: the embedder and Qdrant are not called, and the answer does not
 claim that the index was empty.
 
-Concretely, `rag.py` does four things:
+Concretely, `rag.py` does five things:
 
 1. **Embed the query.** It calls `embedder`'s `POST /v1/embeddings` with the
    text prefixed `"search_query: "`. This prefix matters: the
-   `nomic-embed-text-v1.5` model was trained with asymmetric prefixes -
-   `search_document: ` for the things you're indexing (that's the indexer's
+   `nomic-embed-text-v1.5` model was trained with asymmetric prefixes.
+   `search_document: ` is for the things you're indexing (that's the indexer's
    job, for chunks) and `search_query: ` for the things you're searching
    with. Mixing them up doesn't error, it just silently makes retrieval
    worse, so `rag.py` hardcodes the query-side prefix as a constant rather
@@ -74,8 +74,10 @@ Concretely, `rag.py` does four things:
 2. **Search Qdrant.** It prefetches the top 20 chunks by cosine similarity
    (`dense`) and the top 20 by BM25 (`bm25`, IDF on the server) and fuses
    them with reciprocal rank fusion. Exact identifiers match on the sparse
-   leg; paraphrases match on the dense leg. A collection that has not been
-   rebuilt yet falls back to dense-only search.
+   leg; paraphrases match on the dense leg. Both legs carry a payload filter
+   on the active checkout's id (the `checkouts` field), so a shared
+   collection never returns another checkout's chunks. A collection that has
+   not been rebuilt yet falls back to dense-only search.
 3. **Rerank.** When `RERANKER_BASE_URL` is set, fusion returns 20 chunks and
    `reranker` (`POST /v1/rerank`, bge-reranker-v2-m3) keeps the top 5. If
    that call fails, the RRF order is kept and truncated to 5. An empty URL
@@ -110,7 +112,7 @@ failures propagated as HTTP 500s, the very first request against a fresh
 checkout would fail loudly for a reason that has nothing to do with the
 user's question. Instead, `/chat` always returns `200` with a clear signal
 (`used_context: false`) about whether repository-specific context was
-available - see `tests/agent/test_rag.py` for the three degradation cases
+available. See `tests/agent/test_rag.py` for the three degradation cases
 this is tested against: normal retrieval, a missing collection, and an empty
 collection.
 
@@ -119,11 +121,12 @@ On a `code` route the agent also places dirty files from `svn status` or
 written back into Qdrant). A question about the shape of the tree receives
 a ranked signature map (`services/agent/repo_map.py`) in addition to the
 chunks. A registered checkout searches that remote's collection, not
-`code_chunks`.
+`code_chunks`. The "tool list" in the diagram is the 39 named tools; see
+[Agent loop](../architecture/agent-loop.md).
 
 ## Further reading
 
-- [Tool calling](tool-calling.md) - what happens to the assembled context
+- [Tool calling](tool-calling.md), what happens to the assembled context
   and query once they reach the LLM.
-- [Agent API reference](../reference/agent-api.md) - the exact `/chat`
+- [Agent API reference](../notes/contracts/agent-api.md), the exact `/chat`
   request/response shape, including `sources` and `used_context`.

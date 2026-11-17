@@ -76,7 +76,7 @@ jobs:
           # `common.tool_models`, hence MYPYPATH for that one only (with it
           # set, `services.tools.*` would be visible twice - see pyproject.toml).
           echo "== mypy services/agent"; MYPYPATH=services mypy services/agent
-          for d in services/indexer services/tools services/common services/trainer services/mcp services/patch scripts; do
+          for d in services/indexer services/tools services/common services/trainer services/mcp scripts; do
             echo "== mypy $d"; mypy "$d"
           done
 

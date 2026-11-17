@@ -36,7 +36,7 @@ chunks like "the last third of `parse_arguments`, then a blank line, then
 the first two lines of `run_server`". The resulting embedding is a blurry
 average of two unrelated concepts. When a user later asks "how does
 `parse_arguments` handle missing flags?", the query embedding has to match
-against that blurry vector - and it often loses to some other blurry chunk
+against that blurry vector, and it often loses to some other blurry chunk
 that happens to share more surface-level words.
 
 The fix is to chunk at **structural boundaries that already carry meaning**:
@@ -62,10 +62,10 @@ A few structural details worth knowing if you're reading `chunker.py`:
 - **Templates.** `template <typename T> class Box { ... }` is represented in
   the syntax tree as a `template_declaration` wrapping the `class_specifier`.
   The chunker walks up one level so the emitted chunk's line range includes
-  the `template <...>` header - otherwise the chunk text would start
+  the `template <...>` header, otherwise the chunk text would start
   mid-declaration and look confusing out of context.
 - **Nested classes and methods.** Chunking happens at *every* matching node,
-  not just the outermost one, so a nested class produces its own chunk (e.g.
+  including nested ones, so a nested class produces its own chunk (e.g.
   `Outer::Inner`) in addition to the outer class's chunk (which still
   contains the nested class's text too, in full). Overlap here is
   intentional: a broad "here's the whole class" chunk and a narrow "here's
@@ -76,7 +76,7 @@ A few structural details worth knowing if you're reading `chunker.py`:
   itself, so the chunker uses that text as-is instead of re-deriving the
   class name from ancestor scopes.
 - **Preprocessor macros** are parsed by `tree-sitter-cpp` as ordinary syntax
-  nodes (not expanded), so a `#define` never crashes the parser - it's just
+  nodes (not expanded), so a `#define` never crashes the parser. It's just
   not one of the node types the chunker looks for, so it never becomes its
   own chunk. Code that *uses* a macro is chunked normally around it.
 - **Unsupported and empty files** are handled explicitly rather than left
@@ -88,27 +88,27 @@ A few structural details worth knowing if you're reading `chunker.py`:
 ## Non-C++ files: `text_chunker.py`
 
 The files people ask about most after the code itself are the build system
-and the docs - "which target links libcurl?", "what does the README say
+and the docs, "which target links libcurl?", "what does the README say
 about presets?". Those are not C++ and tree-sitter-cpp cannot parse them, so
 `chunker.py` hands them to `text_chunker.py`, which applies **the same
 technique** with the community grammars bundled in
 [`tree-sitter-language-pack`](https://github.com/Goldziher/tree-sitter-language-pack)
 rather than re-implementing Markdown/CMake/YAML parsing by hand (the
-grammars already handle the edge cases - fenced code blocks, setext
-headings, bracket arguments, multi-document YAML - that a regex would get
+grammars already handle the edge cases, fenced code blocks, setext
+headings, bracket arguments, multi-document YAML, that a regex would get
 wrong):
 
 | Format | Detected by | Grammar unit used as a chunk | `symbol_name` |
 |---|---|---|---|
-| Markdown (`.md`) | extension | `section` - own content only, child sections are chunked separately; text before the first heading is a `<preamble>` | the heading text |
+| Markdown (`.md`) | extension | `section`, own content only, child sections are chunked separately; text before the first heading is a `<preamble>` | the heading text |
 | CMake (`CMakeLists.txt`, `*.cmake`) | name / extension | top-level `normal_command`, `function_def`, `macro_def`, `if_condition`, ... | first `project` / `add_executable` / `add_library` / `function` name |
 | YAML (`.yaml`, `.clang-tidy`, ...) | extension / name | top-level `block_mapping_pair` of each document | the key |
 | JSON (`CMakePresets.json`, `.json`) | name / extension | top-level `pair` of the root object | the key |
 | TOML (`.toml`) | extension | top-level `table` / `pair` | the table header / key |
 | INI, shell, `Containerfile`, plain text | extension / name | *(no grammar)* fixed 60-line windows, 10-line overlap | `<file-level>` or `<lines a-b>` |
 
-What the grammars do not decide - and is therefore the only policy written
-in this module - is sizing: consecutive small units (CMake commands, YAML
+What the grammars do not decide, and is therefore the only policy written
+in this module, is sizing: consecutive small units (CMake commands, YAML
 keys, JSON pairs) are **packed** together up to 60 lines so we never embed a
 one-line chunk (the symbol then lists the first names: `pumba_app, app,
 agent_client_test, …`), and any unit longer than 120 lines or 1800
@@ -127,7 +127,7 @@ classes and would produce nonsense for a README section.
 `nomic-embed-text-v1.5` (the embedding model behind the `embedder` service)
 was trained to expect a short task instruction prepended to every input
 string: `"search_document: "` for text being indexed, `"search_query: "` for
-a user's question at retrieval time. This isn't optional metadata - it's
+a user's question at retrieval time. This isn't optional metadata. It's
 part of how the model was trained to place vectors in space, and it's also
 one of the most dangerous kinds of bug you can ship in a RAG system, because
 **getting it wrong doesn't produce an error.**
@@ -144,12 +144,12 @@ The indexer's answer is to make prefixing structurally impossible to skip:
 `embeddings_client.embed_texts()` prepends `search_document: ` to every
 input *inside* the client, unconditionally, before it ever touches the
 network (the network part itself is the official `openai` SDK pointed at
-the embedder's `/v1` - retries and response typing come from it, only the
+the embedder's `/v1`, retries and response typing come from it, only the
 prefixing and the "one vector per input, in order" check are ours). Callers (`main.py`, and any future caller) pass raw chunk text and
 get back correctly-prefixed embeddings; there's no code path that reaches
 the embedder without going through this function. The equivalent
 `search_query: ` prefixing for user questions lives in the `agent` service,
-since that's the module that actually has a user query to prefix - see
+since that's the module that actually has a user query to prefix. See
 [RAG, explained](rag-explained.md).
 
 The same chunk is also stored as a sparse `bm25` vector (term frequencies;
@@ -159,7 +159,7 @@ only has the old unnamed 768-d vector is dropped on the next index run.
 
 ## Idempotent upserts: re-indexing shouldn't duplicate anything
 
-The indexer is designed to be run over and over - every time the mounted tree changes,
+The indexer is designed to be run over and over, every time the mounted tree changes,
 someone (or the `--watch` flag, best-effort) re-runs it. A naive
 "always insert a new point" design would mean every re-index of an unchanged
 file doubles that file's points in Qdrant, and after a few weeks of CI runs
@@ -180,14 +180,14 @@ uuid.uuid5(FIXED_NAMESPACE, f"{file_path}\x1f{git_blob_hash}\x1f{symbol_name}\x1
 
 A few things make this work reliably:
 
-- **`uuid5` is a pure function of its inputs** - same inputs always produce
+- **`uuid5` is a pure function of its inputs**, same inputs always produce
   the same UUID, with no external state or randomness involved. Qdrant point
   IDs must be an unsigned integer or a UUID string, so `uuid5` (rather than,
   say, a raw hex digest) is what actually satisfies the storage layer's
   requirements while still being deterministic.
 - **The namespace UUID is fixed and must never change.** `uuid5` mixes the
   namespace into the hash, so changing it would silently reassign every
-  chunk a new ID on the next run - defeating the entire point.
+  chunk a new ID on the next run, defeating the entire point.
 - **A separator character joins the fields before hashing**, so that
   `("ab", "1", 0)` and `("a", "b1", 0)` can't collide by having their
   concatenated strings happen to match.
@@ -222,8 +222,10 @@ and `files_deleted`.
 
 ## Running it
 
-The primary supported path is the one-shot batch job, run via the `index`
-compose profile:
+The day-to-day entry points are `python scripts/deploy.py index` (default
+tree) and `python scripts/deploy.py workspace <path>` (another checkout);
+they recreate the mounts and then run the batch job below. The job itself
+is the one-shot `index` compose profile:
 
 ```bash
 podman compose --profile index run --rm indexer
@@ -234,15 +236,16 @@ chunks and embeds every source file, upserts into Qdrant's `code_chunks`
 collection, and exits. Each processed file and a final summary are logged as
 one JSON object per line on stdout (`structlog`, via the shared
 `services/common/logging.py`; `file_error`/`fatal` at `error` level, the
-rest at `info`), so the output is easy to grep or pipe into `jq` - see
+rest at `info`), so the output is easy to grep or pipe into `jq`. See
 [Reindexing the codebase](../guides/reindexing-the-codebase.md) for
 day-to-day usage.
 
-`main.py` also accepts a `--watch` flag that keeps the process running and
-re-indexes files as they change, using the `watchdog` package. **This is
-best-effort and Linux-preferred.** `watchdog` relies on `inotify` on Linux,
+`main.py` also accepts a `--watch` flag that runs one full batch first, then
+keeps the process running and re-indexes files as they change (`watchdog`,
+0.5s debounce so a save burst is one upsert). **This is best-effort and
+Linux-preferred.** `watchdog` relies on `inotify` on Linux,
 and inotify events do not propagate reliably through the
 Windows host → Podman machine → WSL2 → bind-mount chain this project runs
 on by default. If you're on that stack, don't rely on `--watch` picking up
-your edits - just re-run the one-shot job. On a native Linux host bind-mounting
+your edits, just re-run the one-shot job. On a native Linux host bind-mounting
 a real filesystem (no VM hop in between), `--watch` behaves as expected.

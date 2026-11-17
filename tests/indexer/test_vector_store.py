@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 from chunker import Chunk
-from vector_store import IndexSnapshot, VectorStore, point_id
+from vector_store import VectorStore, point_id
 
 
 def _payload_matches(payload: dict, scroll_filter) -> bool:
@@ -195,6 +195,16 @@ class TestEnsureCollection:
         assert fake.deleted == ["code_chunks"]
         assert len(fake.create_collection_calls) == 1
         assert "bm25" in fake.create_collection_calls[0]["sparse_vectors_config"]
+
+    def test_probe_failure_does_not_delete_the_collection(self):
+        fake = _FakeQdrantClient(existing_collections={"code_chunks"})
+        fake.get_collection = lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("timeout"))
+        store = VectorStore(client=fake, collection="code_chunks")
+
+        store.ensure_collection()
+
+        assert fake.deleted == []
+        assert fake.create_collection_calls == []
 
 
 class TestUpsertIdempotency:
@@ -421,6 +431,40 @@ class TestAttachAndDeleteCost:
         assert len(fake.scroll_calls) == 1
         assert fake.scroll_calls[0]["filter"] is not None
         assert fake.scroll_calls[0]["returned"] == 1
+
+    def test_snapshot_keeps_every_blob_for_one_checkout(self):
+        fake = _FakeQdrantClient(existing_collections={"code_chunks"})
+        store = VectorStore(client=fake, collection="code_chunks")
+        vector = [0.1] * 768
+        store.upsert_chunks([_make_chunk(git_blob_hash="old")], [vector])
+        store.upsert_chunks([_make_chunk(git_blob_hash="new")], [vector])
+        snap = store.snapshot()
+        assert snap.hashes_for("src/widget.cpp") == {"old", "new"}
+
+    def test_missing_checkouts_is_default_not_a_hard_delete(self):
+        fake = _FakeQdrantClient(existing_collections={"code_chunks"})
+        store = VectorStore(client=fake, collection="code_chunks", checkout_id="co_other")
+        vector = [0.1] * 768
+        store_default = VectorStore(client=fake, collection="code_chunks")
+        store_default.upsert_chunks([_make_chunk()], [vector])
+        (point,) = fake.points.values()
+        del point.payload["checkouts"]
+        assert store.delete_by_file_paths(["src/widget.cpp"]) == 1
+        assert len(fake.points) == 1
+        snap = store_default.snapshot()
+        assert point.id in snap.unstored_owners
+        store_default.persist_checkouts(snap.unstored_owners)
+        assert point.payload["checkouts"] == ["default"]
+
+    def test_delete_by_blob_keeps_the_new_version(self):
+        fake = _FakeQdrantClient(existing_collections={"code_chunks"})
+        store = VectorStore(client=fake, collection="code_chunks")
+        vector = [0.1] * 768
+        store.upsert_chunks([_make_chunk(git_blob_hash="old")], [vector])
+        store.upsert_chunks([_make_chunk(git_blob_hash="new")], [vector])
+        store.delete_by_file_paths(["src/widget.cpp"], git_blob_hash="old")
+        hashes = {point.payload["git_blob_hash"] for point in fake.points.values()}
+        assert hashes == {"new"}
 
     def test_ensure_collection_creates_payload_indexes(self):
         fake = _FakeQdrantClient(existing_collections=set())

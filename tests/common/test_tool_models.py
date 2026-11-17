@@ -35,38 +35,31 @@ class TestSchemaGeneration:
 
     def test_required_matches_models(self) -> None:
         by_name = {t["function"]["name"]: t["function"]["parameters"] for t in tm.openai_tools_schema()}
-        assert by_name["search"]["required"] == ["pattern"]
-        assert by_name["read_file"]["required"] == ["path"]
-        assert by_name["list_files"]["required"] == []
+        assert by_name["git_log"]["required"] == []
+        assert by_name["git_blame"]["required"] == ["path"]
         assert by_name["lint_clang_tidy"]["required"] == ["paths"]
         assert by_name["build"]["required"] == []  # preset defaults server-side
 
     def test_bounds_are_in_the_schema(self) -> None:
         by_name = {t["function"]["name"]: t["function"]["parameters"]["properties"] for t in tm.openai_tools_schema()}
-        assert by_name["search"]["max_results"]["maximum"] == tm.SEARCH_HARD_MAX_RESULTS
-        assert by_name["search"]["max_results"]["minimum"] == 1
-        assert by_name["list_files"]["max_results"]["maximum"] == tm.LIST_FILES_HARD_MAX_RESULTS
-        assert by_name["read_file"]["start_line"] == {
-            "type": "integer",
-            "minimum": 1,
-            "description": "Optional 1-based first line to return.",
-        }
+        assert by_name["git_log"]["max_count"]["maximum"] == 50
+        assert by_name["git_log"]["max_count"]["minimum"] == 1
 
     def test_endpoint_map(self) -> None:
         mapping = tm.endpoint_map()
-        assert mapping["read_file"] == {"method": "GET", "path": "/read-file"}
-        assert mapping["search"] == {"method": "POST", "path": "/search"}
+        assert mapping["git_log"] == {"method": "POST", "path": "/git/log"}
+        assert mapping["build"] == {"method": "POST", "path": "/build"}
         assert set(mapping) == set(tm.TOOL_SPECS_BY_NAME)
 
 
 class TestModels:
     def test_extra_keys_are_rejected(self) -> None:
         with pytest.raises(ValidationError):
-            tm.SearchArgs.model_validate({"pattern": "x", "recursive": True})
+            tm.GitLogArgs.model_validate({"path": "src/a.cpp", "recursive": True})
 
     def test_bounds_enforced(self) -> None:
         with pytest.raises(ValidationError):
-            tm.SearchArgs.model_validate({"pattern": "x", "max_results": tm.SEARCH_HARD_MAX_RESULTS + 1})
+            tm.GitLogArgs.model_validate({"max_count": 0})
         with pytest.raises(ValidationError):
             tm.ReadFileArgs.model_validate({"path": "a", "start_line": 0})
 
@@ -78,7 +71,8 @@ class TestModels:
 
     def test_exclude_unset_forwards_only_what_the_model_said(self) -> None:
         assert tm.BuildArgs.model_validate({}).model_dump(exclude_unset=True) == {}
-        assert tm.SearchArgs.model_validate({"pattern": "p"}).model_dump(exclude_unset=True) == {"pattern": "p"}
+        dumped = tm.GitLogArgs.model_validate({"path": "src/a.cpp"}).model_dump(exclude_unset=True)
+        assert dumped == {"path": "src/a.cpp"}
 
 
 class TestContractWithToolsService:
@@ -88,11 +82,9 @@ class TestContractWithToolsService:
 
     @pytest.fixture(scope="class")
     def openapi(self) -> dict:
-        from services.patch.main import app as patch_app
         from services.tools import main as tools_main
 
         paths = dict(tools_main.app.openapi()["paths"])
-        paths.update(patch_app.openapi()["paths"])
         return {"paths": paths}
 
     def test_every_spec_has_a_route_with_same_method(self, openapi: dict) -> None:

@@ -2,5 +2,11 @@
 # shared CI/devtools venv (agent's fastapi 0.115 → starlette 0.41,
 # pydantic 2.10.4). mcp 1.21+ requires pydantic>=2.11 — do not bump here
 # without also moving agent.
+#
+# mcp 1.12.4 imports pydantic._internal._typing_extra.eval_type_backport
+# at startup. pydantic 2.14 removed that name, and mcp only requires
+# pydantic>=2.8,<3, so a fresh pip install resolves 2.14 and the process
+# dies on ImportError. Pin the same 2.10.4 as agent.
 httpx==0.28.1
 mcp==1.12.4
+pydantic==2.10.4

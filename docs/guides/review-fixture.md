@@ -9,18 +9,21 @@ project under review.
 `sample/` names the mistakes, so a review that only sees the mounted tree
 cannot read this page.
 
-The stack mounts `CODEBASE_PATH` (default `./sample`) read-only at
-`/workspace/app`. A suggested fix comes back as a fenced `diff` block to
-copy. Apply it on the host, in `sample/`, then run the oracle below again.
-Optional notes for that tree live in `sample/.llm/rules/*.md` (the indexer
-skips `.llm`). A field `instructions` on `POST /chat` adds a note for one
-question.
+The stack mounts `CODEBASE_PATH` (default `./sample`) at `/workspace/app`:
+read-only for `agent` and `tools`, read-write for `serena`. A
+question that asks for a fix gets a fenced `diff` block when it also says not
+to apply it (the [RTX 6000 scenarios](../notes/verification/rtx6000-scenarios.md) do); otherwise the
+agent may change `sample/` itself through Serena's write tools, which opens
+**editing** until a `build_step` succeeds, and never commits. Either way,
+run the oracle below again on the host. Optional notes for that tree live in
+`sample/.llm/rules/*.md` (the indexer skips `.llm`). A field `instructions`
+on `POST /chat` adds a note for one question.
 
 ## Known mistakes
 
 | Expression | Current result | Contract |
 |---|---|---|
-| `2+3*4` | `20` | `14` (`*` and `/` bind tighter than `+` and `-`) |
+| `2+3*4` | `20` | `14` (`*`, `/`, and `%` bind tighter than `+` and `-`) |
 | `8-3-2` | `7` | `3` (`-` is left-associative; the code recurses on the right) |
 | `2^3^2` | `64` | `512` (`^` is right-associative) |
 | `5^0` | `0` | `1` |

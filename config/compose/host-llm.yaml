@@ -4,8 +4,22 @@
 # an outbound path to the internet.
 
 services:
+  llm:
+    profiles: ["container-llm"]
+    # LLM_PORT belongs to llama-server on the host. A leftover start must
+    # not publish it.
+    ports: !override []
   agent:
     networks:
       - publish-net
     extra_hosts:
       - "host.containers.internal:host-gateway"
+    depends_on: !override
+      embedder:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      tools:
+        condition: service_healthy
+      serena:
+        condition: service_healthy

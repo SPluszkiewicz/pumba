@@ -1,0 +1,14 @@
+[
+  {
+    "id": "T1",
+    "prompt": "Remplace cette question. Décris le rôle du point d'entrée de ce dépôt et cite les fichiers lus."
+  },
+  {
+    "id": "T2",
+    "prompt": "Remplace cette question. Où est implémentée la recherche dans l'index ? Cite path:ligne."
+  },
+  {
+    "id": "T3",
+    "prompt": "Remplace cette question. Propose un seul diff unifié pour un changement petit et local. N'applique pas le diff."
+  }
+]

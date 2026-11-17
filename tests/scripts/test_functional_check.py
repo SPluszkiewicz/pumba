@@ -9,7 +9,7 @@ import functional_check
 import httpx
 
 
-def test_run_functional_checks_passes_all_22_steps(tmp_path: Path) -> None:
+def test_run_functional_checks_passes_all_25_steps(tmp_path: Path) -> None:
     header = tmp_path / "calculator.hpp"
     header.write_text("int Evaluate(int x);\n", encoding="utf-8")
 
@@ -22,6 +22,11 @@ def test_run_functional_checks_passes_all_22_steps(tmp_path: Path) -> None:
                 200,
                 text="<html></html>",
                 headers={"content-type": "text/html; charset=utf-8", "Content-Security-Policy": "default-src 'self'"},
+            )
+        if path == "/metrics":
+            return httpx.Response(
+                200,
+                text="# HELP python_info Python platform information\npython_info 1.0\n",
             )
         auth = request.headers.get("authorization", "")
         if auth != "Bearer secret":
@@ -146,13 +151,13 @@ def test_run_functional_checks_passes_all_22_steps(tmp_path: Path) -> None:
                         "conversation_id": "conv-hibou",
                     },
                 )
-            if "list_files" in query:
+            if "list_dir" in query:
                 return httpx.Response(
                     200,
                     json={
                         "used_context": True,
                         "sources": [],
-                        "tool_calls": [{"name": "list_files", "arguments": {}}],
+                        "tool_calls": [{"name": "list_dir", "arguments": {"relative_path": "."}}],
                         "answer": "src/calculator.cpp, src/calculator.hpp",
                         "conversation_id": "c-tools",
                     },
@@ -196,7 +201,7 @@ def test_run_functional_checks_passes_all_22_steps(tmp_path: Path) -> None:
             return httpx.Response(200, json={"status": "ok"})
         body = json.loads(request.read())
         if body["method"] == "tools/list":
-            tools = [{"name": n} for n in ("lookup", "check", "outline", "calls", "types", "ask")]
+            tools = [{"name": n} for n in ("lookup", "check", "calls", "types", "ask")]
             return httpx.Response(200, json={"jsonrpc": "2.0", "id": 1, "result": {"tools": tools}})
         if body["method"] == "tools/call":
             tname = body["params"]["name"]
@@ -236,6 +241,6 @@ def test_run_functional_checks_passes_all_22_steps(tmp_path: Path) -> None:
             llm_client=llm_client,
         )
 
-    assert len(results) == 23
+    assert len(results) == 25
     assert all(r.ok for r in results), [(r.name, r.detail) for r in results if not r.ok]
     assert "dirty-functional-check-marker" not in header.read_text(encoding="utf-8")

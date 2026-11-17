@@ -25,7 +25,7 @@ class Parser {
         int left = ParseSigned();
         while (true) {
             const char op = Peek();
-            if (op != '+' && op != '-' && op != '*' && op != '/') {
+            if (op != '+' && op != '-' && op != '*' && op != '/' && op != '%') {
                 break;
             }
             Consume(op);
@@ -37,6 +37,11 @@ class Parser {
                 left += right;
             } else if (op == '*') {
                 left *= right;
+            } else if (op == '%') {
+                if (right == 0) {
+                    throw CalcError("division by zero");
+                }
+                left %= right;
             } else if (right == 0) {
                 return 0;
             } else {

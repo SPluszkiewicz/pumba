@@ -99,16 +99,39 @@ def iter_source_files(root: Path) -> Iterator[Path]:
     """Yield indexable files under `root`, sorted, without entering build or VCS trees."""
     found: list[Path] = []
 
+    root_resolved = root.resolve()
+    seen_dirs: set[Path] = set()
+
     def walk(directory: Path) -> None:
+        try:
+            real = directory.resolve()
+        except OSError:
+            return
+        try:
+            real.relative_to(root_resolved)
+        except ValueError:
+            return
+        if real in seen_dirs:
+            return
+        seen_dirs.add(real)
         try:
             children = list(directory.iterdir())
         except OSError:
             return
         for child in children:
-            if child.is_dir():
+            try:
+                is_dir = child.is_dir()
+                is_file = child.is_file()
+            except OSError:
+                continue
+            if is_dir:
                 if not _skip_directory(child.name):
                     walk(child)
-            elif child.is_file() and is_source_file(child):
+            elif is_file and is_source_file(child):
+                try:
+                    child.resolve().relative_to(root_resolved)
+                except (OSError, ValueError):
+                    continue
                 found.append(child)
 
     walk(root)
@@ -342,20 +365,22 @@ def chunk_source(
     return chunks
 
 
-def chunk_file(path: Path, source_root: Path) -> List[Chunk]:
+def chunk_file(path: Path, source_root: Path, content: bytes | None = None) -> List[Chunk]:
     """Chunk a single file on disk. Returns [] for unsupported or empty files.
 
     C++ goes through tree-sitter (`chunk_source`); supported text formats
     (CMake, Markdown, YAML, ...) go through `text_chunker`. Never raises on
     an unsupported file - it is skipped, and unreadable files are treated as
     empty, so a batch run over a mixed tree never crashes on a binary asset.
+    Pass `content` when the caller already read the bytes used for the hash.
     """
     if not is_source_file(path):
         return []
-    try:
-        content = path.read_bytes()
-    except OSError:
-        return []
+    if content is None:
+        try:
+            content = path.read_bytes()
+        except OSError:
+            return []
     try:
         rel_path = path.relative_to(source_root).as_posix()
     except ValueError:

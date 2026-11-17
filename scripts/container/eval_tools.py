@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Score whether the agent calls the expected first tool (no LLM-as-judge).
 
-Run inside the stack (devtools or host with AGENT_BASE_URL):
+Run on a network that reaches `agent`, with AGENT_BEARER_TOKEN set: the
+`smoke-test` service (`podman compose --profile test run --rm smoke-test ...`)
+or the host with AGENT_BASE_URL. `devtools` has neither the token nor a route
+to `agent`:
 
     python scripts/container/eval_tools.py
     python scripts/container/eval_tools.py --scenarios scripts/container/eval_tools_scenarios.json

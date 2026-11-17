@@ -4,13 +4,15 @@ from __future__ import annotations
 
 from contextvars import ContextVar
 
+from serena_named_tools import SERENA_WRITE_NAMES
+
 PHASE: ContextVar[str] = ContextVar("edit_phase", default="idle")
 
-_OPEN = frozenset({"begin_plan", "edit", "apply"})
+_OPEN = SERENA_WRITE_NAMES
 _BLOCKED = frozenset({"build", "test", "compile_file"})
 
 _WAIT = (
-    "Edits are in progress. Finish this plan step, then call build_step once. "
+    "Edits are in progress. Call build_step once. "
     "Do not compile each file, and do not commit."
 )
 
@@ -26,7 +28,10 @@ def gate_tool(name: str) -> str | None:
     return None
 
 
-def observe_tool(name: str) -> None:
+def observe_tool(name: str, *, ok: bool = True) -> None:
+    """Apply a phase transition for one executed tool. A failure changes nothing."""
+    if not ok:
+        return
     if name in _OPEN:
         PHASE.set("editing")
     elif name == "build_step":

@@ -2,11 +2,10 @@
 .env
 atlassian.env
 
-# Model weights
-models/*.gguf
-models/hf/
-models/adapters/
-models/training/
+# Model weights. models/README.md is the only tracked file here.
+# Shards live in a subdirectory (models/UD-Q5_K_M/), which models/*.gguf misses.
+models/*
+!models/README.md
 
 # Build outputs
 build/
@@ -28,9 +27,17 @@ site/
 
 # Editor / OS
 .vscode/
+.cursor/
 .idea/
 Thumbs.db
 .DS_Store
+~$*
+
+# Local tickets, benches, and scratch checkouts (docs/agents/ is the convention)
+.scratch/
+
+# Serena project state written when a checkout is activated on the host
+.serena/
 
 # Qdrant local data (if ever run outside a named volume)
 qdrant_storage/
@@ -41,14 +48,8 @@ qdrant_storage/
 # Transient stdin prompt for `deploy.py ask -`
 .prompt.tmp
 
-# Generated checkout mounts and the indexer queue lock
-state/compose.workspaces.yaml
-state/index.lock
-state/workspaces.json
-state/profile-campaign.json
-state/profile-campaign.env.bak
-state/compare/
-state/host-llm.pid
-state/host-llm.log
+# Runtime state: workspaces, locks, pids, logs, the expose allow-list,
+# the profile-campaign report, and the downloaded llama-server binary.
+state/
 .wsl-setup/
 wsl-distro/

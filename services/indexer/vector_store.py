@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Iterator, List, Optional, Sequence
 
 from chunker_types import Chunk
@@ -71,17 +71,33 @@ class IndexSnapshot:
 
     checkout_hashes: dict[str, str]
     blob_points: dict[tuple[str, str], list[tuple[Any, list[str]]]]
+    checkout_blobs: dict[str, set[str]] = field(default_factory=dict)
+    unstored_owners: dict[Any, list[str]] = field(default_factory=dict)
 
     @property
     def blobs(self) -> set[tuple[str, str]]:
         return set(self.blob_points)
+
+    def hashes_for(self, file_path: str) -> set[str]:
+        blobs = self.checkout_blobs.get(file_path)
+        if blobs:
+            return set(blobs)
+        one = self.checkout_hashes.get(file_path)
+        return {one} if one else set()
 
 
 def _owners(payload: dict[str, Any]) -> list[str]:
     owners = payload.get("checkouts")
     if isinstance(owners, list):
         return [str(item) for item in owners]
-    return []
+    return [DEFAULT_CHECKOUT_ID]
+
+
+def _stored_owners(payload: dict[str, Any]) -> tuple[list[str], bool]:
+    owners = payload.get("checkouts")
+    if isinstance(owners, list):
+        return [str(item) for item in owners], True
+    return [DEFAULT_CHECKOUT_ID], False
 
 
 def _equals_filter(**fields: str) -> Filter:
@@ -90,8 +106,11 @@ def _equals_filter(**fields: str) -> Filter:
     )
 
 
-def _paths_filter(paths: Sequence[str]) -> Filter:
-    return Filter(must=[FieldCondition(key="file_path", match=MatchAny(any=list(paths)))])
+def _paths_filter(paths: Sequence[str], git_blob_hash: str | None = None) -> Filter:
+    must: list[FieldCondition] = [FieldCondition(key="file_path", match=MatchAny(any=list(paths)))]
+    if git_blob_hash:
+        must.append(FieldCondition(key="git_blob_hash", match=MatchValue(value=git_blob_hash)))
+    return Filter(must=must)
 
 
 def _sparse_for_chunk(chunk: Chunk) -> SparseVector:
@@ -130,23 +149,31 @@ class VectorStore:
         self.checkout_id = raw_co.strip() or DEFAULT_CHECKOUT_ID
         self.client = client or QdrantClient(url=self.url)
 
-    def _has_hybrid_schema(self) -> bool:
-        """True when the live collection already has `dense` and `bm25`."""
+    def _has_hybrid_schema(self) -> bool | None:
+        """True/False when the live schema is readable. None if the probe failed."""
         try:
             info = self.client.get_collection(self.collection)
             params = info.config.params
             vectors = params.vectors
             sparse = getattr(params, "sparse_vectors", None) or {}
-        except Exception:  # noqa: BLE001 - missing collection or unexpected client shape
-            return False
+        except Exception as exc:  # noqa: BLE001 - missing collection or unexpected client shape
+            log.warning("qdrant_schema_probe_failed", collection=self.collection, error=repr(exc))
+            return None
         named_dense = isinstance(vectors, dict) and DENSE_VECTOR_NAME in vectors
         return named_dense and SPARSE_VECTOR_NAME in sparse
 
     def ensure_collection(self) -> None:
-        """Create `dense` + `bm25`, or recreate a pre-hybrid collection."""
+        """Create `dense` + `bm25`, or recreate a pre-hybrid collection.
+
+        A failed schema probe leaves the existing collection alone. Deleting
+        it would drop the index because a timeout looked like "legacy".
+        """
         if self.client.collection_exists(self.collection):
-            if self._has_hybrid_schema():
+            hybrid = self._has_hybrid_schema()
+            if hybrid is True:
                 self._ensure_payload_indexes()
+                return
+            if hybrid is None:
                 return
             log.warning("qdrant_collection_recreate", collection=self.collection, reason="missing_hybrid_schema")
             self.client.delete_collection(self.collection)
@@ -205,6 +232,10 @@ class VectorStore:
                 )
         return len(updates)
 
+    def persist_checkouts(self, updates: dict[Any, list[str]]) -> int:
+        """Write `checkouts` on points that were read as implicit default."""
+        return self._set_checkouts(updates)
+
     def upsert_chunks(self, chunks: Sequence[Chunk], vectors: Sequence[List[float]]) -> int:
         """Upsert one point per (chunk, vector) pair. Returns the number of points written."""
         if len(chunks) != len(vectors):
@@ -247,6 +278,8 @@ class VectorStore:
         if not self.client.collection_exists(self.collection):
             return IndexSnapshot({}, {})
         checkout_hashes: dict[str, str] = {}
+        checkout_blobs: dict[str, set[str]] = {}
+        unstored_owners: dict[Any, list[str]] = {}
         blob_points: dict[tuple[str, str], list[tuple[Any, list[str]]]] = {}
         for record in self._scroll(["file_path", "git_blob_hash", "checkouts"]):
             payload = record.payload or {}
@@ -254,14 +287,15 @@ class VectorStore:
             if not file_path:
                 continue
             blob_hash = str(payload.get("git_blob_hash") or "")
-            owners = _owners(payload)
+            owners, stored = _stored_owners(payload)
+            if not stored:
+                unstored_owners[record.id] = owners
             blob_points.setdefault((file_path, blob_hash), []).append((record.id, owners))
-            in_checkout = self.checkout_id in owners or (
-                not owners and self.checkout_id == DEFAULT_CHECKOUT_ID
-            )
-            if in_checkout and file_path not in checkout_hashes:
-                checkout_hashes[file_path] = blob_hash
-        return IndexSnapshot(checkout_hashes, blob_points)
+            if self.checkout_id in owners:
+                checkout_blobs.setdefault(file_path, set()).add(blob_hash)
+                if file_path not in checkout_hashes:
+                    checkout_hashes[file_path] = blob_hash
+        return IndexSnapshot(checkout_hashes, blob_points, checkout_blobs, unstored_owners)
 
     def listed_index_state(self) -> tuple[dict[str, str], set[tuple[str, str]]]:
         """Return `(checkout_hashes, all_blobs)`.
@@ -320,19 +354,23 @@ class VectorStore:
         """Add `self.checkout_id` to every point of `(file_path, git_blob_hash)` without re-embedding."""
         return self.attach_checkouts([(file_path, git_blob_hash)], snapshot=snapshot)
 
-    def delete_by_file_paths(self, paths: Sequence[str]) -> int:
-        """Detach `self.checkout_id` from `paths`; delete points that no checkout owns anymore."""
+    def delete_by_file_paths(self, paths: Sequence[str], *, git_blob_hash: str | None = None) -> int:
+        """Detach `self.checkout_id` from `paths`; delete points that no checkout owns anymore.
+
+        `git_blob_hash` limits the detach to one blob so a successful re-embed
+        can drop the previous version without touching the points just upserted.
+        """
         unique = [p for p in dict.fromkeys(paths) if p]
         if not unique or not self.client.collection_exists(self.collection):
             return 0
         to_delete: list[Any] = []
         to_shrink: dict[Any, list[str]] = {}
-        for record in self._scroll(["file_path", "checkouts"], _paths_filter(unique)):
+        for record in self._scroll(
+            ["file_path", "git_blob_hash", "checkouts"],
+            _paths_filter(unique, git_blob_hash),
+        ):
             payload = record.payload or {}
-            owners = payload.get("checkouts")
-            if not isinstance(owners, list):
-                to_delete.append(record.id)
-                continue
+            owners = _owners(payload)
             if self.checkout_id not in owners:
                 continue
             remaining = [co for co in owners if co != self.checkout_id]

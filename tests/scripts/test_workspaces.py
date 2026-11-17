@@ -91,7 +91,7 @@ def test_docker_on_windows_keeps_the_drive_path() -> None:
     )
 
 
-def test_patch_mount_is_writable_and_the_others_stay_read_only() -> None:
+def test_checkout_mounts_do_not_name_patch() -> None:
     data = {
         "checkouts": [
             {"path": "D:/svn/ticket", "mount": "/checkouts/co_abc"},
@@ -99,9 +99,21 @@ def test_patch_mount_is_writable_and_the_others_stay_read_only() -> None:
     }
     text = registry.compose_mounts_text(data, host_path_for=lambda raw: raw)
     assert '"D:/svn/ticket:/checkouts/co_abc:ro"' in text
-    patch = text.split("  patch:", 1)[1]
-    assert "/checkouts/co_abc:ro" not in patch
-    assert "/checkouts/co_abc\"" in patch
+    assert "  patch:" not in text
+
+
+def test_serena_checkout_mount_is_writable() -> None:
+    data = {
+        "checkouts": [
+            {"path": "D:/svn/ticket", "mount": "/checkouts/co_abc"},
+        ]
+    }
+    text = registry.compose_mounts_text(data, host_path_for=lambda raw: raw)
+    tools = text.split("  tools:", 1)[1].split("  agent:", 1)[0]
+    serena = text.split("  serena:", 1)[1]
+    assert '"D:/svn/ticket:/checkouts/co_abc:ro"' in tools
+    assert "/checkouts/co_abc:ro" not in serena
+    assert "/checkouts/co_abc\"" in serena
 
 
 def test_mcp_file_gains_the_workspace_header(tmp_path) -> None:

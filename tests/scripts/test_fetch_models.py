@@ -104,7 +104,7 @@ def test_pinned_checksums_are_real_sha256_hex():
         assert all(c in "0123456789abcdef" for c in spec.sha256)
 
 
-def test_fetch_skips_download_when_file_present_and_checksum_matches(tmp_path, monkeypatch):
+def test_fetch_skips_download_when_file_present_and_checksum_matches(tmp_path, monkeypatch, capsys):
     content = b"already downloaded"
     (tmp_path / "model.gguf").write_bytes(content)
     spec = _spec(sha256=hashlib.sha256(content).hexdigest())
@@ -120,18 +120,19 @@ def test_fetch_skips_download_when_file_present_and_checksum_matches(tmp_path, m
     fetch_models.fetch(spec, force=False)
 
     assert called is False
+    logged = capsys.readouterr().out
+    assert "download skipped" in logged
+    assert "verifying" not in logged
 
 
-def test_fetch_raises_on_checksum_mismatch_for_existing_file(tmp_path, monkeypatch):
+def test_fetch_does_not_rehash_a_file_already_on_disk(tmp_path, monkeypatch):
     (tmp_path / "model.gguf").write_bytes(b"corrupted-or-wrong-file")
     spec = _spec(sha256="0" * 64)
     monkeypatch.setattr(fetch_models, "_download", lambda *a, **k: pytest.fail("should not re-download"))
+    monkeypatch.setattr(fetch_models, "_sha256_of", lambda _path: pytest.fail("should not rehash"))
 
-    with pytest.raises(fetch_models.ChecksumMismatchError):
-        fetch_models.fetch(spec, force=False)
+    fetch_models.fetch(spec, force=False)
 
-    # The mismatching file is left in place for the operator to inspect -
-    # only fresh downloads that fail verification get deleted automatically.
     assert (tmp_path / "model.gguf").exists()
 
 
@@ -229,6 +230,7 @@ def test_main_extra_fetches_only_that_gguf(monkeypatch):
     assert fetch_models.main() == 0
     assert fetched == [fetch_models.EXTRA_MODELS["coder-30b-q5"]]
     assert fetch_models.EXTRA_MODELS["coder-32b-q5"].sha256
+    assert fetch_models.EXTRA_MODELS["gpt-oss-20b"].sha256
 
 
 def test_main_default_selects_full_chat_model_and_embedder(monkeypatch):

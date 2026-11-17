@@ -590,6 +590,18 @@
           pushStep(trace, "Le modèle appelle " + (data.name || "un outil") + " " + args);
         }
         setStatus("Outil " + (data.name || "") + " en cours…");
+      } else if (message.event === "nudge") {
+        const reason = data.reason || "";
+        const label = reason === "needs_build"
+          ? "La boucle reprend : l'édition n'est pas vérifiée."
+          : reason === "no_tool"
+            ? "La boucle reprend : aucun outil n'a encore été appelé."
+            : "La boucle reprend : un outil est encore en échec.";
+        pushStep(trace, label);
+        state.draft = "";
+        state.writing = false;
+        renderMarkdown(answer, state.answer);
+        setStatus("Le modèle reprend…");
       } else if (message.event === "tool_result") {
         const summary = data.result_summary || "";
         const live = Object.values(state.liveTools).find(function (item) {

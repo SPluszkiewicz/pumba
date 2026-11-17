@@ -18,7 +18,7 @@ def test_mcp_server_name_matches_product() -> None:
 async def test_list_tools_exposes_facts_and_ask() -> None:
     tools = await mcp.list_tools()
     names = [tool.name for tool in tools]
-    assert names == ["lookup", "check", "outline", "calls", "types", "ask"]
+    assert names == ["lookup", "check", "calls", "types", "ask"]
     for tool in tools:
         assert "unchanged" in (tool.description or "")
     ask_tool = next(tool for tool in tools if tool.name == "ask")

@@ -20,11 +20,14 @@ HOST_LLM_PID = REPO_ROOT / "state" / "host-llm.pid"
 ENV_EXAMPLE = REPO_ROOT / ".env.example"
 MODELS_DIR = REPO_ROOT / "models"
 TRAIN_LOCK_FILE = MODELS_DIR / "training" / ".train.lock"
-HF_TRAIN_BASE_MARKER = MODELS_DIR / "hf" / "Qwen2.5-7B-Instruct" / "config.json"
+HF_TRAIN_BASE_MARKER = MODELS_DIR / "hf" / "Mistral-Small-4-119B-2603" / "config.json"
 DEFAULT_LORA_GGUF = "/models/adapters/latest/adapter.gguf"
-CORE_SERVICES = ["qdrant", "llm", "embedder", "reranker", "tools", "agent", "mcp"]
-UP_SERVICES = [*CORE_SERVICES, "ui-proxy"]
-SMOKE_SERVICES = ["qdrant", "llm", "embedder", "tools", "agent", "mcp"]
+CORE_SERVICES = ["qdrant", "llm", "embedder", "reranker", "tools", "agent", "mcp", "ui-proxy"]
+UP_SERVICES = list(CORE_SERVICES)
+SMOKE_SERVICES = ["qdrant", "llm", "embedder", "tools", "agent", "mcp", "ui-proxy"]
+# Host llama-server loading Mistral Small 4 Q5 (~83 Go) needs more than the
+# default compose health timeout.
+HOST_LLM_READY_TIMEOUT = 900
 PLACEHOLDER_TOKEN = "changeme-generate-a-real-secret"
 CDI_GPU_DEVICE = "nvidia.com/gpu=all"
 CDI_NVIDIA_YAML = Path("/etc/cdi/nvidia.yaml")
@@ -39,17 +42,18 @@ DISK_BUDGET_GIB = 12
 _RUNTIME = "podman"
 _VALID_RUNTIMES = ("auto", "podman", "docker")
 WSL_DISTRO_DEFAULT = product.WSL_DISTRO
-_HOST_ONLY_COMMANDS = frozenset({"export", "gpu-profile"})
+_HOST_ONLY_COMMANDS = frozenset({"export", "gpu-profile", "check", "expose"})
 HOST_LLM_HEALTH_URL = "http://127.0.0.1:8080/health"
-GPU_PROFILES = ("16g", "24g", "24g-30b", "48g", "48g-30b", "48g-32b", "evo-x5")
+GPU_PROFILES = ("16g", "16g-gptoss", "24g", "24g-30b", "48g", "48g-30b", "48g-32b", "evo-x5")
 GPU_PROFILE_DIR = REPO_ROOT / "config" / "profiles"
 PROFILE_EXTRA = {
+    "16g-gptoss": "gpt-oss-20b",
     "24g-30b": "coder-30b-q5",
     "48g-30b": "coder-30b-q8",
     "48g-32b": "coder-32b-q5",
     "evo-x5": "mistral-small-4",
 }
-_MOUNT_DEPENDENT_SERVICES = ["tools", "patch", "agent", "ui-proxy"]
+_MOUNT_DEPENDENT_SERVICES = ["tools", "agent", "ui-proxy"]
 
 CheckStatus = Literal["ok", "warn", "fail", "skip"]
 
@@ -98,19 +102,27 @@ from deploy.gpu import (  # noqa: E402
 )
 from deploy.host_llm import (  # noqa: E402
     _host_llm_alive,
+    _host_llm_health_url,
+    _host_llm_port,
     _host_llm_selected,
     _host_llm_weights_missing,
     _require_host_llm_weights,
     _start_host_llm,
     _stop_host_llm,
+    _stop_llm_container,
     _wait_http,
 )
 from deploy.compose import (  # noqa: E402
     _compose_build_and_up,
+    _compose_ps_payload,
+    _health_from_compose_ps,
     _parse_compose_ps_health,
+    _parse_compose_ps_json,
     _wait_healthy,
+    _wait_published_doors,
 )
 from deploy.stack import (  # noqa: E402
+    _fetch_weights,
     _recreate_mount_dependents,
     _run_repo_index,
     cmd_down,
@@ -152,6 +164,7 @@ from deploy.doctor import (  # noqa: E402
     _render_terminal,
     cmd_doctor,
 )
+from deploy.expose import cmd_expose  # noqa: E402
 from deploy.cli import main  # noqa: E402
 
 # Reachable as `deploy.shutil` / `deploy.time` in tests.

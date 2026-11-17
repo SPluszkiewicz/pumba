@@ -212,6 +212,18 @@ class TestFileDiscovery:
         found = {p.name for p in chunker.iter_source_files(tmp_path)}
         assert found == {"app.cpp"}
 
+    def test_iter_source_files_skips_symlink_cycles(self, tmp_path):
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "a.cpp").write_text("int a() { return 1; }\n")
+        loop = src / "loop"
+        try:
+            loop.symlink_to(src)
+        except OSError:
+            pytest.skip("symlinks not allowed")
+        found = list(chunker.iter_source_files(tmp_path))
+        assert [p.name for p in found] == ["a.cpp"]
+
     def test_chunk_file_relative_path(self, tmp_path):
         sub = tmp_path / "src" / "nested"
         sub.mkdir(parents=True)

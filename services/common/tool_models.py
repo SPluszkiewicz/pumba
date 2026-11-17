@@ -28,9 +28,6 @@ __all__ = [
     "ToolArgs",
     "BuildArgs",
     "BuildStepArgs",
-    "BeginPlanArgs",
-    "EditArgs",
-    "ApplyArgs",
     "TestArgs",
     "CompileArgs",
     "GitLogArgs",
@@ -41,11 +38,8 @@ __all__ = [
     "SvnDiffArgs",
     "SvnLogArgs",
     "PathsArgs",
-    "SearchArgs",
-    "ListFilesArgs",
     "ReadFileArgs",
     "LspPositionArgs",
-    "LspSymbolsArgs",
     "LspOutlineArgs",
     "LspCallsArgs",
     "LspTypesArgs",
@@ -54,19 +48,11 @@ __all__ = [
     "TOOL_SPECS_BY_NAME",
     "openai_tools_schema",
     "endpoint_map",
-    "SEARCH_DEFAULT_MAX_RESULTS",
-    "SEARCH_HARD_MAX_RESULTS",
-    "LIST_FILES_DEFAULT_MAX_RESULTS",
-    "LIST_FILES_HARD_MAX_RESULTS",
     "READ_FILE_MAX_LINES",
 ]
 
 # Hard caps - the handlers import these so the schema and the enforcement
 # can't disagree.
-SEARCH_DEFAULT_MAX_RESULTS = 50
-SEARCH_HARD_MAX_RESULTS = 100
-LIST_FILES_DEFAULT_MAX_RESULTS = 200
-LIST_FILES_HARD_MAX_RESULTS = 500
 READ_FILE_MAX_LINES = 400
 
 
@@ -108,34 +94,6 @@ class CompileArgs(ToolArgs):
 
 class PathsArgs(ToolArgs):
     paths: list[str] = Field(description="Repo-relative file paths to check.")
-
-
-class SearchArgs(ToolArgs):
-    pattern: str = Field(description="Literal string or regex pattern to search for.")
-    regex: bool = Field(default=False, description="Whether `pattern` should be treated as a regex.")
-    max_results: int = Field(
-        default=SEARCH_DEFAULT_MAX_RESULTS,
-        ge=1,
-        le=SEARCH_HARD_MAX_RESULTS,
-        description=(
-            f"Maximum number of matching lines to return (1-{SEARCH_HARD_MAX_RESULTS}, "
-            f"default {SEARCH_DEFAULT_MAX_RESULTS})."
-        ),
-    )
-
-
-class ListFilesArgs(ToolArgs):
-    path: Optional[str] = Field(default=None, description="Repo-relative directory to list (omit for project root).")
-    glob: Optional[str] = Field(default=None, description="Optional glob filter, e.g. '*.hpp' or 'src/**/*.cpp'.")
-    max_results: int = Field(
-        default=LIST_FILES_DEFAULT_MAX_RESULTS,
-        ge=1,
-        le=LIST_FILES_HARD_MAX_RESULTS,
-        description=(
-            f"Maximum number of paths to return (1-{LIST_FILES_HARD_MAX_RESULTS}, "
-            f"default {LIST_FILES_DEFAULT_MAX_RESULTS})."
-        ),
-    )
 
 
 class GitLogArgs(ToolArgs):
@@ -202,14 +160,6 @@ class LspPositionArgs(ToolArgs):
     )
 
 
-class LspSymbolsArgs(ToolArgs):
-    query: str = Field(description="Symbol name or prefix to look up (workspace/symbol).")
-    preset: str = Field(
-        default_factory=_default_preset,
-        description="CMake preset whose compile_commands.json clangd should use.",
-    )
-
-
 class LspOutlineArgs(ToolArgs):
     path: str = Field(description="Repo-relative file whose symbol outline to list.")
     preset: str = Field(
@@ -246,32 +196,6 @@ class BuildStepArgs(ToolArgs):
             "and only when the plan touched more than one target. One parallel build, not one per file."
         ),
     )
-
-
-class BeginPlanArgs(ToolArgs):
-    plan: str = Field(description="Repo-relative file that lists the sources to change.")
-    focus: Optional[str] = Field(
-        default=None,
-        description="Optional extra source the user named, in addition to the paths in the plan.",
-    )
-    max_files: Optional[int] = Field(
-        default=None,
-        ge=1,
-        le=500,
-        description="File budget for this campaign. Default 200. Hard cap 500.",
-    )
-
-
-class EditArgs(ToolArgs):
-    campaign_id: str = Field(description="Id returned by begin_plan.")
-    path: str = Field(description="Repo-relative file. Must be named in the plan or in focus.")
-    old: str = Field(description="Exact excerpt that occurs once in the current file.")
-    new: str = Field(description="Replacement text. Does not write the file.")
-
-
-class ApplyArgs(ToolArgs):
-    campaign_id: str = Field(description="Id returned by begin_plan.")
-    proposal_id: str = Field(description="Id returned by edit. This call writes the working copy. It does not commit.")
 
 
 class ReadFileArgs(ToolArgs):
@@ -342,26 +266,6 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         PathsArgs,
     ),
     ToolSpec(
-        "search",
-        "POST",
-        "/search",
-        "Search the codebase for a literal string or regex pattern. Use this to find real "
-        "usages/definitions instead of guessing at symbol names or call sites. Output is "
-        f"capped at `max_results` lines (default {SEARCH_DEFAULT_MAX_RESULTS}, max "
-        f"{SEARCH_HARD_MAX_RESULTS}); if `truncated` is true in the result, narrow the pattern.",
-        SearchArgs,
-    ),
-    ToolSpec(
-        "list_files",
-        "GET",
-        "/list-files",
-        "List files under a repo-relative directory (default: the project root), optionally "
-        "filtered by a glob such as '*.hpp' or 'src/**/*.cpp'. Use this to discover real paths "
-        "before calling read_file, instead of guessing. Returns at most `max_results` sorted "
-        f"paths (default {LIST_FILES_DEFAULT_MAX_RESULTS}).",
-        ListFilesArgs,
-    ),
-    ToolSpec(
         "git_log",
         "POST",
         "/git/log",
@@ -418,45 +322,6 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         SvnLogArgs,
     ),
     ToolSpec(
-        "lsp_definition",
-        "POST",
-        "/lsp/definition",
-        "Jump to the definition of the symbol at a 1-based line and column, using clangd. "
-        "Prefer this over search for overloads, templates, and using-aliases.",
-        LspPositionArgs,
-    ),
-    ToolSpec(
-        "lsp_references",
-        "POST",
-        "/lsp/references",
-        "List references of the symbol at a 1-based line and column, using clangd. "
-        f"At most {40} locations.",
-        LspPositionArgs,
-    ),
-    ToolSpec(
-        "lsp_hover",
-        "POST",
-        "/lsp/hover",
-        "Show clangd's hover (type and brief docs) for the symbol at a 1-based line and column.",
-        LspPositionArgs,
-    ),
-    ToolSpec(
-        "lsp_symbols",
-        "POST",
-        "/lsp/symbols",
-        "Find workspace symbols by name via clangd. Use this when search would match comments "
-        "and overloads instead of the real declaration.",
-        LspSymbolsArgs,
-    ),
-    ToolSpec(
-        "lsp_outline",
-        "POST",
-        "/lsp/outline",
-        "List the symbols declared in one file (clangd documentSymbol). "
-        "Each line is `name kind line`. Facts only, no commentary.",
-        LspOutlineArgs,
-    ),
-    ToolSpec(
         "lsp_calls",
         "POST",
         "/lsp/calls",
@@ -473,33 +338,6 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         LspTypesArgs,
     ),
     ToolSpec(
-        "begin_plan",
-        "POST",
-        "/begin",
-        "Read a plan file and open an edit campaign. Returns campaign_id and the source paths "
-        "the plan names (plus focus, if given). Later edits are refused outside that list. "
-        "Does not write. Does not commit.",
-        BeginPlanArgs,
-    ),
-    ToolSpec(
-        "edit",
-        "POST",
-        "/edit",
-        "Propose a replacement of one exact excerpt. The excerpt must occur once. "
-        "Returns a unified diff and checks that it applies. Does not write the file. "
-        "Call apply with the returned proposal_id to write the working copy. "
-        "Do not call build, test, or compile_file between edits.",
-        EditArgs,
-    ),
-    ToolSpec(
-        "apply",
-        "POST",
-        "/apply",
-        "Write one accepted edit into the working copy. Does not commit, push, or run the compiler. "
-        "The shared index is left unchanged.",
-        ApplyArgs,
-    ),
-    ToolSpec(
         "build_step",
         "POST",
         "/build-step",
@@ -508,16 +346,6 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         "Omit target only for a final solution build when more than one target was built. "
         "On failure, the repair field says compile_file (exactly one .cpp in the log) or build_step.",
         BuildStepArgs,
-    ),
-    ToolSpec(
-        "read_file",
-        "GET",
-        "/read-file",
-        f"Read a single repo-relative file, optionally a 1-based line window. At most "
-        f"{READ_FILE_MAX_LINES} lines are returned per call; when the result has `truncated: true`, "
-        "call again with `start_line` set to `end_line + 1`. Use this to confirm what code "
-        "actually says before commenting on it.",
-        ReadFileArgs,
     ),
 )
 

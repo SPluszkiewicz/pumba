@@ -1,0 +1,61 @@
+# Serena 2.1 configuration for the sidecar. Keys match the image template so
+# startup does not rewrite this file. The behaviours under test are the
+# ignored write targets and the switches that stay off.
+language_backend: LSP
+agent_interface: tools
+line_ending: native
+gui_log_window: false
+web_dashboard: false
+web_dashboard_open_on_launch: false
+web_dashboard_interface:
+web_dashboard_listen_address: 127.0.0.1
+web_dashboard_trusted_hosts:
+  - 127.0.0.1
+  - localhost
+jetbrains_plugin_server_address: 127.0.0.1
+jetbrains_launch_command:
+log_level: 20
+trace_lsp_communication: false
+ls_specific_settings: {}
+ls_priorities:
+ignored_paths:
+  - ".git"
+  - ".svn"
+  - ".env"
+  - ".env.*"
+read_only_memory_patterns: []
+ignored_memory_patterns: []
+tool_timeout: 240
+excluded_tools:
+  - execute_shell_command
+  - serena_repl
+  - open_dashboard
+  - jet_brains_find_symbol
+  - jet_brains_move
+  - jet_brains_safe_delete
+  - jet_brains_inline_symbol
+  - jet_brains_find_referencing_symbols
+  - jet_brains_get_symbols_overview
+  - jet_brains_type_hierarchy
+  - jet_brains_find_declaration
+  - jet_brains_find_implementations
+  - jet_brains_rename
+  - jet_brains_debug
+  - jet_brains_run_inspections
+  - jet_brains_list_inspections
+included_optional_tools: []
+fixed_tools: []
+excluded_apis: []
+included_apis: []
+base_modes:
+  - interactive
+  - editing
+  - no-memories
+default_modes:
+default_max_tool_answer_chars: 150000
+token_count_estimator: CHAR_COUNT
+symbol_info_budget: 10
+project_serena_folder_location: /tmp/serena/$projectFolderName/.serena
+trusted_project_path_patterns: []
+auth_secret:
+projects: []

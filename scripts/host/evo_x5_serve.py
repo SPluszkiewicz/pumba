@@ -23,6 +23,9 @@ import os
 import shutil
 import subprocess
 import sys
+import tarfile
+import urllib.request
+import zipfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -33,6 +36,14 @@ THREADS = "16"
 
 # Mistral's pair for this model: none is 0.1, high is 0.7.
 TEMPERATURE = {"none": "0.1", "high": "0.7"}
+# Same tag as the container images (CONTRACTS.md). Vulkan build: the EVO GPU
+# is not NVIDIA, and this build also runs on an NVIDIA host.
+LLAMA_CPP_TAG = "b10216"
+_VULKAN_ASSETS = {
+    "win32": "llama-b10216-bin-win-vulkan-x64.zip",
+    "linux": "llama-b10216-bin-ubuntu-vulkan-x64.tar.gz",
+}
+BINARY_DIR = REPO_ROOT / "state" / "llama-server"
 
 
 def profile_map(path: Path) -> dict[str, str]:
@@ -135,6 +146,103 @@ def serve_argv(
     ]
 
 
+def _binary_filename(system: str) -> str:
+    return "llama-server.exe" if system == "win32" else "llama-server"
+
+
+def _contained(name: str) -> bool:
+    path = Path(name)
+    return bool(name) and name != "." and not path.is_absolute() and ".." not in path.parts
+
+
+def _find_binary(dest: Path, binary_name: str) -> Path | None:
+    direct = dest / binary_name
+    if direct.is_file():
+        return direct
+    matches = [path for path in dest.rglob(binary_name) if path.is_file()]
+    return matches[0] if matches else None
+
+
+def _download(url: str, dest: Path, opener) -> None:
+    with opener(url) as response, dest.open("wb") as out:
+        shutil.copyfileobj(response, out)
+
+
+def _extract(archive: Path, dest: Path) -> None:
+    if archive.suffix == ".zip":
+        with zipfile.ZipFile(archive) as zipped:
+            for info in zipped.infolist():
+                if _contained(info.filename):
+                    zipped.extract(info, dest)
+        return
+    with tarfile.open(archive, "r:gz") as packed:
+        members = [
+            member
+            for member in packed.getmembers()
+            if _contained(member.name) and not member.issym() and not member.islnk()
+        ]
+        packed.extractall(dest, members=members)
+
+
+def _open_release(url: str):
+    request = urllib.request.Request(url, headers={"User-Agent": "pumba-deploy"})
+    return urllib.request.urlopen(request, timeout=180)
+
+
+def install_pinned_server(dest: Path, *, backend: str, system: str, opener=None) -> Path | None:
+    """Download the pinned Vulkan llama-server into `dest` when it is not there yet."""
+    asset = _VULKAN_ASSETS.get(system) if backend == "vulkan" else None
+    if asset is None:
+        print(
+            f"[evo-x5] pas de binaire {LLAMA_CPP_TAG} pour {system} / {backend}.",
+            file=sys.stderr,
+            flush=True,
+        )
+        return None
+    dest = Path(dest)
+    binary_name = _binary_filename(system)
+    if dest.is_dir():
+        found = _find_binary(dest, binary_name)
+        if found is not None:
+            return found
+    url = f"https://github.com/ggml-org/llama.cpp/releases/download/{LLAMA_CPP_TAG}/{asset}"
+    print(f"[evo-x5] llama-server absent du PATH. Téléchargement de {asset}", file=sys.stderr, flush=True)
+    dest.mkdir(parents=True, exist_ok=True)
+    archive = dest / asset
+    try:
+        _download(url, archive, opener or _open_release)
+        _extract(archive, dest)
+    except OSError as exc:
+        print(f"[evo-x5] installation impossible : {exc}", file=sys.stderr, flush=True)
+        return None
+    finally:
+        archive.unlink(missing_ok=True)
+    found = _find_binary(dest, binary_name)
+    if found is None:
+        print(f"[evo-x5] {binary_name} absent de l'archive.", file=sys.stderr, flush=True)
+        return None
+    if system != "win32":
+        found.chmod(found.stat().st_mode | 0o755)
+    return found
+
+
+def ensure_binary(name: str, *, backend: str, dest: Path | None = None) -> str | None:
+    """PATH, an explicit file, or the pinned release cached under state/llama-server."""
+    if Path(name).is_file():
+        return str(Path(name))
+    found = shutil.which(name)
+    if found:
+        return found
+    if os.name == "nt":
+        system = "win32"
+    elif sys.platform.startswith("linux"):
+        system = "linux"
+    else:
+        system = sys.platform
+    installed = install_pinned_server(dest or BINARY_DIR, backend=backend, system=system)
+    return str(installed) if installed else None
+
+
 def format_invocation(argv: list[str], env: dict[str, str]) -> str:
     prefix = " ".join(f"{key}={value}" for key, value in env.items())
     body = " ".join(argv)
@@ -175,7 +283,7 @@ def main(argv: list[str] | None = None) -> int:
     if not args.run:
         return 0
 
-    resolved = args.binary if Path(args.binary).is_file() else shutil.which(args.binary)
+    resolved = ensure_binary(args.binary, backend=args.backend)
     if not resolved:
         print(f"[evo-x5] {args.binary} introuvable sur PATH.", file=sys.stderr, flush=True)
         return 1

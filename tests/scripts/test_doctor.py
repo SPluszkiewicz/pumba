@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import subprocess
 from types import SimpleNamespace
 
@@ -323,6 +324,20 @@ def test_doctor_checks_host_llm_when_profile_is_evo(monkeypatch, tmp_path):
     checks = {c.name: c for c in deploy._doctor_check_services()}
     assert checks["llm"].status == "ok"
     assert "4242" in checks["llm"].detail
+
+
+def test_doctor_check_services_reads_json_ps(monkeypatch):
+    payload = json.dumps(
+        [
+            {"Service": name, "Health": "healthy", "State": "running"}
+            for name in deploy.CORE_SERVICES
+        ]
+    )
+    monkeypatch.setattr(
+        subprocess, "run", lambda *_a, **_k: SimpleNamespace(returncode=0, stdout=payload, stderr="")
+    )
+    checks = {c.name: c.status for c in deploy._doctor_check_services()}
+    assert checks == {name: "ok" for name in deploy.CORE_SERVICES}
 
 
 def test_doctor_check_services_fails_when_compose_ps_errors(monkeypatch):

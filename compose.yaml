@@ -28,6 +28,8 @@ networks:
 
 volumes:
   qdrant-data: {}
+  # tools writes the CMake compile cache here. serena mounts the same volume read-only.
+  cmake-cache: {}
 
 services:
   # ---------------------------------------------------------------- qdrant
@@ -102,7 +104,7 @@ services:
       context: .
       dockerfile: containers/embedder/Containerfile
       args:
-        GPU: "${EMBEDDER_GPU_ARG:-1}"
+        GPU: "${EMBEDDER_GPU_ARG:-0}"
     networks: [core-net]
     volumes:
       - ./models:/models:ro
@@ -134,7 +136,7 @@ services:
       context: .
       dockerfile: containers/embedder/Containerfile
       args:
-        GPU: "${EMBEDDER_GPU_ARG:-1}"
+        GPU: "${EMBEDDER_GPU_ARG:-0}"
     networks: [core-net]
     volumes:
       - ./models:/models:ro
@@ -190,6 +192,9 @@ services:
     environment:
       - AGENT_BEARER_TOKEN=${AGENT_BEARER_TOKEN}
       - AGENT_TOOL_LOOP_MAX_ITERATIONS=${AGENT_TOOL_LOOP_MAX_ITERATIONS}
+      - AGENT_LOOP_NUDGES=${AGENT_LOOP_NUDGES:-3}
+      - AGENT_LOOP_MALFORMED_LIMIT=${AGENT_LOOP_MALFORMED_LIMIT:-3}
+      - AGENT_LOOP_REPEAT_LIMIT=${AGENT_LOOP_REPEAT_LIMIT:-3}
       - AGENT_REQUEST_TIMEOUT_SECONDS=${AGENT_REQUEST_TIMEOUT_SECONDS}
       - AGENT_LLM_MAX_RETRIES=${AGENT_LLM_MAX_RETRIES:-2}
       - AGENT_MAX_CONCURRENT=${AGENT_MAX_CONCURRENT:-2}
@@ -210,7 +215,6 @@ services:
       - QDRANT_URL=${QDRANT_URL}
       - QDRANT_COLLECTION=${QDRANT_COLLECTION}
       - TOOLS_BASE_URL=${TOOLS_BASE_URL}
-      - PATCH_BASE_URL=${PATCH_BASE_URL:-http://patch:8093}
       - AGENT_PROJECT_ROOT=/workspace/app
     depends_on:
       llm:
@@ -221,7 +225,7 @@ services:
         condition: service_healthy
       tools:
         condition: service_healthy
-      patch:
+      serena:
         condition: service_healthy
     # containers/agent/Containerfile installs curl specifically for this (no
     # wget in that image) - keep in sync with that Containerfile.
@@ -251,6 +255,13 @@ services:
     depends_on:
       agent:
         condition: service_healthy
+    # Busybox wget ships in nginxinc alpine. `/health` is proxied to agent.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8090/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
     read_only: true
     tmpfs: ["/tmp"]
     # Listens on 8090 (> 1024) as a non-root user: no capability is needed.
@@ -291,29 +302,51 @@ services:
     tmpfs: ["/tmp"]
     restart: unless-stopped
 
-  # ----------------------------------------------------------------- patch
-  # The only service whose checkout mount is read-write. agent and tools stay :ro.
-  # Not published: it is on tools-net, next to the agent. No commit, no push.
-  patch:
-    build:
-      context: .
-      dockerfile: containers/patch/Containerfile
+  # ---------------------------------------------------------------- serena
+  # Code-intelligence sidecar on tools-net. Not published: only the agent
+  # can open it. The image tag is the upgrade.
+  serena:
+    image: ghcr.io/oraios/serena:2.1.0
     networks: [tools-net]
+    # The image entrypoint expands "$@" unquoted, so a startup script cannot
+    # be one argument. Serena 2.1 rewrites serena_config.yml on startup; a
+    # read-only bind of that path dies with "Device or resource busy".
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - >-
+        source .venv/bin/activate
+        && cp /opt/pumba/serena_config.yml /workspaces/serena/config/serena_config.yml
+        && exec serena start-mcp-server
+        --transport streamable-http
+        --host 0.0.0.0
+        --port 9121
+        --agent-interface tools
+        --language-backend LSP
+        --project /workspace/app
+        --enable-web-dashboard false
+        --open-web-dashboard false
+    environment:
+      # Same switch as TOOLS_HEALTH_STRICT: 1 fails the healthcheck when the
+      # sidecar is not accepting connections, so the agent does not start.
+      - SERENA_HEALTH_STRICT=${SERENA_HEALTH_STRICT:-1}
     volumes:
       - ${CODEBASE_PATH:-./sample}:/workspace/app
-    environment:
-      - PATCH_PROJECT_ROOT=/workspace/app
-      - PATCH_PORT=8093
+      - cmake-cache:/workspace/scratch/cmake-cache:ro
+      - ./config/serena/serena_config.yml:/opt/pumba/serena_config.yml:ro
+    # The image has bash. A closed port is "dead", the way a missing binary
+    # makes tools /health return 503. $$ keeps the container env var for the shell.
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:8093/health || exit 1"]
+      test:
+        [
+          "CMD-SHELL",
+          "if [ \"$$SERENA_HEALTH_STRICT\" = \"1\" ]; then bash -c 'exec 3<>/dev/tcp/127.0.0.1/9121' || exit 1; fi",
+        ]
       interval: 10s
       timeout: 5s
-      retries: 5
-      start_period: 5s
+      retries: 10
+      start_period: 15s
     security_opt: ["no-new-privileges:true"]
     cap_drop: ["ALL"]
-    read_only: true
-    tmpfs: ["/tmp"]
     restart: unless-stopped
 
   # ----------------------------------------------------------------- tools
@@ -326,6 +359,9 @@ services:
       # Whole tree including .git (git_* tools are read-only). CODEBASE_PATH
       # should be a git work tree; sample/ has no .git of its own.
       - ${CODEBASE_PATH:-./sample}:/workspace/app:ro
+      # Shared with serena, which mounts this same volume read-only.
+      # Nested under the scratch tmpfs: the longer path is the cache tools writes.
+      - cmake-cache:/workspace/scratch/cmake-cache
     environment:
       - TOOLS_BUILD_TIMEOUT_SECONDS=${TOOLS_BUILD_TIMEOUT_SECONDS}
       - TOOLS_CMAKE_PRESET=${TOOLS_CMAKE_PRESET}
@@ -366,7 +402,7 @@ services:
       dockerfile: containers/app/Containerfile
     networks: [client-net]
     environment:
-      - AGENT_BASE_URL=http://agent:${AGENT_PORT}
+      - AGENT_BASE_URL=http://agent:8090
       - AGENT_BEARER_TOKEN=${AGENT_BEARER_TOKEN}
       - APP_REQUEST_TIMEOUT_SECONDS=${APP_REQUEST_TIMEOUT_SECONDS:-172800}
     depends_on:
@@ -418,12 +454,14 @@ services:
       - ./:/workspace:rw
     working_dir: /workspace
     environment:
-      - AGENT_BASE_URL=http://agent:${AGENT_PORT}
+      - AGENT_BASE_URL=http://agent:8090
       - AGENT_BEARER_TOKEN=${AGENT_BEARER_TOKEN}
       - LLM_BASE_URL=${LLM_BASE_URL}
       - EMBEDDER_BASE_URL=${EMBEDDER_BASE_URL}
       - QDRANT_URL=${QDRANT_URL}
       - TOOLS_BASE_URL=${TOOLS_BASE_URL}
+      - MCP_BASE_URL=http://mcp:${MCP_PORT:-8092}
+      - UI_PROXY_BASE_URL=http://ui-proxy:8090
     command: ["python", "-m", "pytest", "-v", "tests/integration/test_smoke.py"]
     profiles: ["test"]
 
@@ -451,7 +489,7 @@ services:
       - ${CODEBASE_PATH:-./sample}:/workspace/app:ro
       - ./models:/models:rw
     environment:
-      - TRAIN_BASE_MODEL=${TRAIN_BASE_MODEL:-/models/hf/Qwen2.5-7B-Instruct}
+      - TRAIN_BASE_MODEL=${TRAIN_BASE_MODEL:-/models/hf/Mistral-Small-4-119B-2603}
       - TRAIN_ADAPTER_OUT=${TRAIN_ADAPTER_OUT:-/models/adapters}
       - TRAIN_DATASET_DIR=${TRAIN_DATASET_DIR:-/models/training}
       - TRAIN_SOURCE_ROOT=/workspace/app

@@ -30,9 +30,15 @@ class TestCtestFilter:
     def test_valid_filter_is_appended_as_minus_r(self, tmp_path: Path) -> None:
         argv = test_handler._ctest_argv(tmp_path, "json_round_trip")
         assert argv[-2:] == ["-R", "json_round_trip"]
+        assert "--no-tests=error" in argv
         assert argv[0] == "ctest"
 
-    @pytest.mark.parametrize("bad", ["foo; rm", "-R all", "a b", "$(x)", ""])
+    def test_catch2_name_with_spaces_is_one_argument(self) -> None:
+        assert test_handler.validate_filter("five factorial is one hundred twenty") == (
+            "five factorial is one hundred twenty"
+        )
+
+    @pytest.mark.parametrize("bad", ["foo; rm", "-R all", "$(x)", ""])
     def test_bad_filter_rejected_before_subprocess(self, tmp_path: Path, bad: str) -> None:
         if bad == "":
             assert test_handler.validate_filter(bad) is None

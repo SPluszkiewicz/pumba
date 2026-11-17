@@ -1,148 +1,165 @@
-# Comprendre la stack sans bagage
+# Understanding the stack without the jargon
 
-Cette page est pour quelqu'un qui connaît un projet C++ et CMake, et qui
-n'a pas besoin de savoir comment un modèle est entraîné. Les mêmes faits,
-dans le vocabulaire du code, sont dans la
-[vue d'ensemble](../architecture/overview.md). Le mode d'emploi au quotidien
-est [Utiliser l'assistant](../guides/using-the-assistant.md).
+This page is for someone who knows a C++ and CMake project and does not
+need to know how a model is trained. The same facts, in the vocabulary of
+the code, are in the [overview](../architecture/overview.md). The
+day-to-day guide is [Using the assistant](../guides/using-the-assistant.md).
 
-## À quoi ça sert
+## What it is for
 
-On pose une question sur un dépôt C++ qui reste sur la machine. Le programme
-répond en citant des fichiers, et il peut compiler, lancer les tests ou
-lire un symbole pour vérifier ce qu'il affirme. Il ne reçoit pas un terminal.
-Il n'envoie pas le code à un service extérieur.
+You ask a question about a C++ repository that stays on the machine. The program
+answers by citing files, and it can compile, run the tests or
+read a symbol to verify what it claims. It does not get a terminal.
+It does not send the code to an outside service.
 
-Deux contraintes ont fixé presque tous les choix : le code ne quitte pas le
-poste, et le modèle n'a jamais de shell.
+Two constraints fixed almost every choice: the code never leaves the
+workstation, and the model never has a shell.
 
-## Les mots, une fois
+## The words, once
 
-| Mot | Ici, ça veut dire |
+| Word | Here, it means |
 |---|---|
-| Modèle de chat | Un programme qui continue un texte. Celui qui est servi connaît C++ en général. Il ne connaît pas vos fichiers tant qu'on ne les lui montre pas dans la question. |
-| Fenêtre | La quantité de texte qu'il peut regarder pour une réponse. 32 768 jetons sur les profils 14B, 262 144 sur l'EVO-X5. Quelques dizaines de fichiers, pas un arbre de dix mille. |
-| Index | Un catalogue des fonctions, classes et sections du dépôt. On ne met pas l'arbre entier dans la fenêtre. On y met les quelques morceaux qui collent à la question. |
-| Empreinte | Un vecteur de nombres qui résume un morceau. Deux morceaux proches dans le code donnent des empreintes proches. C'est ce qui permet de chercher « par le sens », pas seulement par le mot exact. |
-| Outil | Une action nommée et bornée : compiler ce fichier, lire ces lignes, lister les appelants. Chaque action a des arguments validés. Il n'y a pas de commande libre. |
-| MCP | Une prise standard pour Cursor ou VS Code. L'éditeur demande des faits (un extrait, un log de test, une liste de symboles). Il ne reçoit pas une dissertation à réécrire. |
+| Chat model | A program that continues a text. The one being served knows C++ in general. It does not know your files until they are shown to it in the question. |
+| Window | The amount of text it can look at for one answer. 32,768 tokens on the 14B profiles, 262,144 on the EVO-X5. A few dozen files, not a tree of ten thousand. |
+| Index | A catalogue of the functions, classes and sections of the repository. The whole tree is not put in the window. Only the few pieces that match the question are. |
+| Embedding | A vector of numbers that summarizes a piece. Two pieces that are close in the code give close embeddings. This is what makes it possible to search "by meaning", not only by the exact word. |
+| Named tool | A named, bounded action: compile this file, read these lines, list the callers. Each action has validated arguments. There is no free command. |
+| Sidecar | A process placed beside the agent, reached over the network, upgraded at its own pace. Here: Serena, which knows the C++ symbols (clangd), reads and searches files, and knows how to modify a symbol. |
+| MCP | A standard plug for Cursor or VS Code. The editor asks for facts (an excerpt, a test log, the callers of a symbol). It does not get an essay to rewrite. |
 
-## Les pièces
+## The pieces
 
-Tout tourne dans des conteneurs. Chacun ne voit que les voisins dont il a
-besoin.
+Everything runs in containers. Each one sees only the neighbors it
+needs.
 
-| Pièce | Rôle en une phrase |
+| Piece | Role in one sentence |
 |---|---|
-| Page `http://127.0.0.1:8090/ui` | Vous posez la question au modèle local. Le jeton reste dans l'onglet. |
-| `mcp` sur `127.0.0.1:8092` | Cursor ou VS Code appellent `lookup`, `check`, `outline`, `calls`, `types`, `ask`. |
-| `llm` sur `127.0.0.1:8080` | Le modèle de chat, branché directement (Continue, ou un client compatible). L'éditeur rédige, ou ce modèle rédige. Les deux ne réécrivent pas la même réponse l'un après l'autre. |
-| `agent` | Il classe la question, va chercher des morceaux, appelle les outils, compte les jetons, renvoie la réponse. |
-| `embedder` | Calcule l'empreinte d'un morceau ou d'une question. |
-| `reranker` | Reclasse les 20 candidats et n'en garde que 5. S'il est arrêté, on garde l'ordre de la première recherche. |
-| `qdrant` | L'étagère des empreintes. Une collection par dépôt distant, partagée par les copies de ce dépôt. |
-| `indexer` | Un passage unique : il découpe l'arbre, calcule les empreintes, range le catalogue. Ce n'est pas un serveur qui reste allumé. |
-| `tools` | Compile, teste, lit, cherche, interroge clangd, lit Git ou Subversion. Montage en lecture seule. |
-| `patch` | Seul processus dont la copie est en écriture. `edit` renvoie un diff, `apply` l'écrit. Pas de commit. |
+| Page `http://127.0.0.1:8090/ui` | You ask the local model your question. The token stays in the tab. |
+| `mcp` on `127.0.0.1:8092` | Cursor or VS Code call `lookup`, `check`, `calls`, `types`, `ask`. |
+| `llm` on `127.0.0.1:8080` | The chat model, plugged in directly (Continue, or a compatible client). Either the editor writes the answer, or this model does. The two do not rewrite the same answer one after the other. |
+| `agent` | It classifies the question, fetches chunks, calls the named tools (39), counts tokens, returns the answer. It checks paths before any call to Serena. |
+| `embedder` | Computes the embedding of a chunk or of a question. |
+| `reranker` | Re-ranks the 20 candidates and keeps only 5. If it is stopped, the order of the first search is kept. |
+| `qdrant` | The shelf of embeddings. One collection per remote repository, shared by the checkouts of that repository. |
+| `indexer` | A single pass: it cuts up the tree, computes the embeddings, files the catalogue. It is not a server that stays running. |
+| `tools` | Compiles (`build`, `build_step`, `compile_file`), tests, runs clang-tidy, clang-format and cppcheck, reads Git or Subversion, gives callers and types via clangd. Read-only mount. It never modifies the repository. |
+| `serena` (sidecar) | C++ symbols, file reading and search, and the 11 tools that write into the checkout. Write mount. No commit. No port on the machine: only `agent` calls it. |
 
-Le modèle de chat, l'étagère et le bac à sable ne se parlent pas entre eux.
-Seul `agent` est sur les trois réseaux. Un modèle qui invente un appel ne
-peut pas ouvrir un shell, ni joindre l'étagère, ni sortir de la machine.
+The chat model, the shelf and the sandbox do not talk to each other.
+Only `agent` is on all three internal networks. A model that invents a
+call cannot open a shell, nor reach the shelf, nor leave the
+machine. The details of the networks are in [Networking](../architecture/networking.md),
+those of each service in the [overview](../architecture/overview.md).
 
-Qui parle à qui. La page et l'éditeur restent sur la machine. L'étagère
-et le bac à sable ne se voient pas.
+Who talks to whom. The page and the editor stay on the machine. The shelf
+and the sandbox cannot see each other.
 
 ```mermaid
 flowchart LR
   page["Page"] --> agent["Agent"]
-  editor["Éditeur"] --> facts["Faits"]
-  editor --> model["Modèle de chat"]
+  editor["Editor"] --> facts["Facts"]
+  editor --> model["Chat model"]
   facts --> agent
   agent --> model
   agent --> shelf["Catalogue"]
-  agent --> sandbox["Bac à sable"]
+  agent --> sandbox["Sandbox"]
+  agent --> sidecar["Serena, beside it"]
 ```
 
-## Une question, de bout en bout
+## One question, end to end
 
-Le calcul ne touche pas le dépôt. Une question de code passe par le
-catalogue, puis au plus huit outils.
+Arithmetic does not touch the repository. A code question goes through the
+catalogue, then through the tools. Eight round trips is the default of the
+code when `AGENT_TOOL_LOOP_MAX_ITERATIONS` is absent. The shipped
+limit is 48 (the value in `.env.example`, which `compose.yaml` passes through).
+The exact rule is in the [agent loop](../architecture/agent-loop.md).
 
 ```mermaid
 flowchart TD
-  question["Question"] --> gate{"Calcul ou code ?"}
-  gate -->|calcul| direct["Réponse directe"]
-  gate -->|code| search["20 par le sens, 20 par les mots"]
-  search --> keep["5 extraits"]
-  keep --> act{"Un outil est utile ?"}
-  act -->|oui| tool["Compiler, lire, ou lister"]
-  tool --> act
-  act -->|non| answer["Réponse qui cite le fichier"]
+  question["Question"] --> gate{"Arithmetic or code?"}
+  gate -->|arithmetic| direct["Direct answer"]
+  gate -->|code| search["20 by meaning, 20 by words"]
+  search --> keep["5 chunks"]
+  keep --> reply["The model replies"]
+  reply --> calls{"Does it call a tool?"}
+  calls -->|yes| tool["Compile, read, look up a symbol, modify"]
+  tool --> reply
+  calls -->|no| open{"Cycle still open?"}
+  open -->|yes, under the limit| refuse["Prose refused"]
+  refuse --> reply
+  open -->|no| answer["Answer that cites the file"]
 ```
 
-Le cycle s'arrête au huitième outil.
+A prose can be refused as long as the edit is not verified: after
+a write, the model must call `build_step`. It can also be refused
+as long as a tool is still failing, and once if the code question
+has not yet called any tool. At the limit, that prose is the answer.
 
-`agent` choisit d'abord un chemin.
+`agent` first chooses a path.
 
-**Direct.** Une salutation ou un calcul. Aucune recherche dans le dépôt,
-aucun outil. Une seule rédaction.
+**Direct.** A greeting or a calculation. No search in the repository,
+no tools. A single drafting pass.
 
-**Code.** Un fichier, un symbole, une compilation, un test, ou la suite
-d'une conversation déjà sur le code. Alors :
+**Code.** A file, a symbol, a compilation, a test, or the continuation
+of a conversation already about the code. Then:
 
-1. La question est transformée en empreinte.
-2. Le catalogue renvoie 20 morceaux par le sens et 20 par les mots exacts
-   (`m_bufferSize` matche le second, une paraphrase matche le premier).
-3. Le second tri n'en garde que 5.
-4. Les fichiers modifiés et pas encore commités sont relus sur la copie et
-   placés devant ces extraits. Ils ne sont pas réécrits dans le catalogue.
-5. Si la question porte sur la forme du dépôt, une carte de signatures
-   (noms de fonctions et de classes, classés pour tenir dans un budget)
-   est collée au prompt.
-6. Le modèle peut appeler un outil, au plus 8 allers-retours. Chaque
-   résultat revient dans la conversation. Il rédige ensuite.
-7. La page affiche le remplissage de la fenêtre. Si la suite déborde, les
-   vieux résultats d'outils sont raccourcis, puis les tours anciens sont
-   pliés en une note.
+1. The question is turned into an embedding.
+2. The catalogue returns 20 pieces by meaning and 20 by exact words
+   (`m_bufferSize` matches the second, a paraphrase matches the first).
+3. The second ranking keeps only 5 of them.
+4. The modified files that are not yet committed are re-read from the checkout and
+   placed in front of these chunks. They are not rewritten into the catalogue.
+5. If the question is about the shape of the repository, a signature map
+   (function and class names, ranked to fit in a budget)
+   is pasted into the prompt.
+6. The model can call a tool, within the round-trip limit given
+   above. Each result comes back into the conversation. It writes the answer
+   when the cycle is closed, or when the limit is reached.
+7. The page shows how full the window is. If the conversation overflows, the
+   old tool results are shortened, then the old turns are
+   folded into a note.
 
-Une question depuis l'éditeur ne suit pas cette boucle d'outils pour
-`ask`. `ask` juge des extraits déjà récupérés, en 400 jetons, et cite
-`chemin:ligne`. Chercher, compiler ou lister des symboles, c'est
-`lookup`, `check`, `outline`, `calls`, `types`.
+A question from the editor does not follow this tool loop for
+`ask`. `ask` judges chunks that were already retrieved, in 400 tokens, and cites
+`path:line`. Searching, compiling or following calls is
+`lookup`, `check`, `calls`, `types`.
 
-## Les choix
+## The choices
 
-| Choix | Pourquoi |
+| Choice | Why |
 |---|---|
-| Tout en local, réseaux sans route vers l'extérieur | Le code du dépôt ne part pas chez un fournisseur. Le seul conteneur qui a Internet est celui qui télécharge les poids, et seulement pendant ce téléchargement. |
-| Pas de shell, 23 actions nommées | Le modèle décide quand compiler ou lire. Ses arguments sont traités comme une entrée non fiable : chemins revalidés, références Git filtrées, sorties plafonnées (400 lignes, 100 correspondances, 40 emplacements clangd). |
-| Chercher au moment de la question, plutôt que réentraîner le modèle sur le dépôt | Un commit de plus ne demande qu'une réindexation. L'entraînement optionnel (QLoRA) vise encore une base 7B ; l'adaptateur ne se charge pas sur le 14B qui répond. |
-| Découper par fonction et par classe, pas par paquets de 50 lignes | Une empreinte n'est utile que si le texte est une idée cohérente. Un bloc qui commence au milieu d'une fonction et finit dans la suivante se retrouve mal. |
-| Deux recherches, puis un second tri | Le sens rate les identifiants exacts. Les mots exacts ratent les paraphrases. Le second modèle ne fait que réordonner. |
-| Deux portes, une seule rédaction | Depuis Cursor, le modèle de l'éditeur rédige à partir des faits. Le 14B rédige quand on le branche sur le port 8080 ou sur la page. Enchaîner les deux, c'est ce qui rend `ask` bruyant. |
-| Faits et jugement séparés | `lookup` et clangd renvoient des lignes. `check` renvoie un journal. `ask` dit si le code le montre, ou dit que le code ne le montre pas. |
-| Lecture seule, aujourd'hui | Le montage du dépôt est `:ro`. Une correction proposée est un diff à copier. La politique d'écriture (qui écrit, où, avec quelle relecture) n'est pas tranchée. |
-| Une collection par URL distante | Deux tickets du même dépôt Subversion ou Git partagent le catalogue. Une seconde copie enregistre le chemin et le montage. Elle ne réindexe pas. |
-| Quantization Q5 pour le 14B | En dessous, le JSON des appels d'outils casse plus souvent. Le fichier fait environ 9,8 Go. Sur une carte 16 Go, l'empreinte et le second tri restent sur le CPU pour laisser la carte au chat. |
+| Everything local, networks with no route to the outside | The repository code does not go to a provider. The only container that has Internet is the one that downloads the weights, and only during that download. |
+| No shell, 39 named actions | The model decides when to compile, read or modify. Its arguments are treated as untrusted input: paths revalidated, Git references filtered, outputs capped (200 lines for Git and Subversion, 40 clangd locations for `lsp_calls` and `lsp_types`, a maximum response size for Serena). The list is in the [agent loop](../architecture/agent-loop.md). |
+| Search at question time, rather than retrain the model on the repository | One more commit only requires a reindex. The optional training (QLoRA) starts from a different base (Mistral Small 4) than the 14B Qwen that answers by default: the adapter does not load on that 14B. |
+| Cut by function and by class, not in blocks of 50 lines | An embedding is only useful if the text is a coherent idea. A block that starts in the middle of a function and ends in the next one is hard to retrieve. |
+| Two searches, then a second ranking | Meaning misses exact identifiers. Exact words miss paraphrases. The second model only reorders. |
+| Two gates, a single drafting pass | From Cursor, the editor's model writes the answer from the facts. The 14B writes when it is plugged in on port 8080 or on the page. Chaining the two is what makes `ask` noisy. |
+| Facts and judgment separated | `lookup` and clangd return lines. `check` returns a log. `ask` says whether the code shows it, or says that the code does not show it. |
+| A single writer, never a commit | `agent` and `tools` mount the repository as `:ro`. Only Serena writes into the checkout. A successful write opens the editing state: `build`, `test` and `compile_file` are refused, and so is the answer, until `build_step` has succeeded. `.git`, `.svn` and `.env` are refused as paths. No commit and no push: reviewing the diff stays with you. |
+| One collection per remote URL | Two checkouts of the same Subversion or Git repository share the catalogue. A second checkout records the path and the mount. It does not reindex. |
+| Q5 quantization for the 14B | Below that, the JSON of tool calls breaks more often. The file is about 9.8 GB. On a 16 GB card, the embedder and the second ranking stay on the CPU to leave the card to the chat. |
 
-## Ce que ça ne fait pas
+## What it does not do
 
-- Ça n'écrit pas dans l'arbre, et ça ne commit pas.
-- Ça ne va pas sur le Web, et ça n'embarque pas la documentation C++ standard.
-- Ça ne surveille pas les fichiers de façon fiable quand l'hôte est Windows
-  et les conteneurs passent par WSL : après une modification à indexer, on
-  relance `python scripts/deploy.py workspace --update <chemin>` (ou
-  `index` pour l'arbre par défaut, `sample/`).
-- Ça ne remplace pas un serveur de fichiers ou d'historique Git dans
-  l'éditeur. Lire un fichier entier et l'historique Git viennent d'autres
-  prises MCP. Le statut Subversion de travail peut venir d'un serveur
-  svn-mcp en lecture seule. Jira et Confluence sont une troisième prise,
-  hors des conteneurs, et ne sont pas indexés.
+- It does not commit and does not push. It writes into the checkout only through
+  Serena's write tools, never through a shell.
+- It does not yet follow the checkout chosen with `workspace` in the Serena
+  tools: the sidecar is launched on the default tree (see the
+  [overview](../architecture/overview.md#the-serena-sidecar)).
+- It does not go on the Web, and it does not ship the standard C++ documentation.
+- It does not watch files reliably when the host is Windows
+  and the containers go through WSL: after a change to index, you
+  rerun `python scripts/deploy.py workspace --update <path>` (or
+  `index` for the default tree, `sample/`).
+- It does not replace a file server or a Git history server in
+  the editor. Reading a whole file and Git history come from other MCP
+  plugs. The working Subversion status can come from a read-only svn-mcp
+  server. Jira and Confluence are a third plug,
+  outside the containers, and are not indexed.
 
-## Ensuite
+## Next
 
-- [Premier lancement](../getting-started/first-run.md) — la page, le jeton, le choix de modèle.
-- [Utiliser l'assistant](../guides/using-the-assistant.md) — une copie de plusieurs milliers de fichiers, la fenêtre, les limites.
-- [VS Code](../guides/vscode.md) — les deux portes.
-- [Présentation de la stack](../architecture/stack-presentation.md) — versions, outils, comparaison.
-- [Recherche](rag-explained.md), [indexation](indexing-pipeline.md), [outils](tool-calling.md) — le détail des trois mécanismes.
+- [First run](../getting-started/first-run.md), the page, the token, the model choice.
+- [Using the assistant](../guides/using-the-assistant.md), a checkout of several thousand files, the window, the limits.
+- [VS Code](../guides/vscode.md), the two gates.
+- [Search](rag-explained.md), [indexing](indexing-pipeline.md), and [tools](tool-calling.md).

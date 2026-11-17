@@ -208,4 +208,4 @@ async def test_disabled_tools_are_not_executed(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(tool_loop, "apply_budget", passthrough)
     async with httpx.AsyncClient() as client:
         result = await tool_loop.run_tool_loop(client, "sys", "4+4", "req", enable_tools=False)
-    assert result == {"answer": "8", "tool_calls": []}
+    assert result == {"answer": "8", "tool_calls": [], "outcome": "ok", "iterations": 1}

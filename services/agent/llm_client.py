@@ -208,10 +208,14 @@ async def chat_completion_stream(
     )
     deltas: list[Any] = []
     tool_slots: dict[int, dict[str, str]] = {}
+    finish: str | None = None
     async for chunk in stream:  # type: ignore[attr-defined]  # stream=True → AsyncStream
         choices = getattr(chunk, "choices", None) or []
         if not choices:
             continue
+        reason = getattr(choices[0], "finish_reason", None)
+        if isinstance(reason, str):
+            finish = reason
         delta = choices[0].delta
         deltas.append(delta)
         text = getattr(delta, "content", None)
@@ -220,7 +224,24 @@ async def chat_completion_stream(
         if on_tool_delta is not None:
             for snapshot in tool_delta_snapshot(delta, tool_slots):
                 await on_tool_delta(snapshot)
-    return {"choices": [{"message": assemble_stream_message(deltas)}]}
+    return {"choices": [{"finish_reason": finish, "message": assemble_stream_message(deltas)}]}
+
+
+_API_MESSAGE_KEYS = ("role", "content", "tool_calls", "tool_call_id")
+
+
+def api_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Drop agent-only keys such as `name` before the chat completion request."""
+    return [{key: message[key] for key in _API_MESSAGE_KEYS if key in message} for message in messages]
+
+
+def finish_reason(completion: dict[str, Any]) -> str | None:
+    """`length` when the reply was cut. Missing on servers that do not send it."""
+    try:
+        reason = completion["choices"][0].get("finish_reason")
+    except (KeyError, IndexError, AttributeError, TypeError):
+        return None
+    return reason if isinstance(reason, str) else None
 
 
 async def embed_query(http_client: httpx.AsyncClient, text: str, request_id: str) -> list[float]:

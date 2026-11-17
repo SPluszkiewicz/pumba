@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from pathlib import Path, PurePosixPath
 
-__all__ = ["PathSafetyError", "validate_path"]
+__all__ = ["PathSafetyError", "mounted_checkout_root", "validate_path"]
 
 
 class PathSafetyError(ValueError):
@@ -115,6 +115,23 @@ def validate_path(raw_path: str, root: Path | str) -> Path:
     if not resolved.is_relative_to(root_resolved):
         raise PathSafetyError(f"path escapes the project root after resolution: {raw_path!r}")
 
+    return resolved
+
+
+def mounted_checkout_root(raw: str) -> Path | None:
+    """Accept only an existing `/checkouts/<id>` directory. Anything else is refused."""
+    text = raw.strip()
+    if not text:
+        return None
+    path = Path(text)
+    if not path.is_absolute():
+        raise ValueError("X-Project-Root must be an absolute path under /checkouts")
+    try:
+        resolved = path.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError("X-Project-Root is not a mounted checkout") from exc
+    if resolved.parent != Path("/checkouts"):
+        raise ValueError("X-Project-Root must be a direct child of /checkouts")
     return resolved
 
 

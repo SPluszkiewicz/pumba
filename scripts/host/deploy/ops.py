@@ -175,7 +175,12 @@ def cmd_train(args: argparse.Namespace) -> int:
             d._write_env_key("LLM_LORA_PATH", d.DEFAULT_LORA_GGUF)
             print(f"[deploy] set LLM_LORA_PATH={d.DEFAULT_LORA_GGUF} in .env")
 
-        d._run(["podman", "compose", "up", "-d", "--force-recreate", "--no-deps", "llm"])
+        if env.get("LLM_SERVE") == "host":
+            d._stop_llm_container()
+            d._start_host_llm()
+        else:
+            d._stop_host_llm()
+            d._run(["podman", "compose", "up", "-d", "--force-recreate", "--no-deps", "llm"])
 
         if not args.skip_index:
             d.cmd_index(argparse.Namespace())
@@ -191,7 +196,16 @@ def cmd_test(_args: argparse.Namespace) -> int:
     docs/guides/testing.md's "End-to-end smoke test" section, which this
     mirrors exactly."""
     d._require_podman()
+    previous_env = d.ENV_FILE
+    d.ENV_FILE = d.REPO_ROOT / ".env.test"
     env_file = ["--env-file", ".env.test"]
+    try:
+        return _cmd_test_with_env(env_file)
+    finally:
+        d.ENV_FILE = previous_env
+
+
+def _cmd_test_with_env(env_file: list[str]) -> int:
     d._run(
         [
             "podman",

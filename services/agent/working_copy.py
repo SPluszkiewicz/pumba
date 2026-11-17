@@ -16,6 +16,45 @@ MAX_OVERLAY_FILES = 6
 MAX_OVERLAY_LINES = 80
 
 
+def chunks_with_live(
+    chunks: list[RetrievedChunk], live: dict[str, str]
+) -> tuple[str, list[dict[str, Any]], list[RetrievedChunk]]:
+    """Caller files replace the same path and are cited from line 1."""
+    refreshed: list[RetrievedChunk] = []
+    seen: set[str] = set()
+    for chunk in chunks:
+        path = chunk.file_path.replace("\\", "/")
+        if path in live:
+            text = _first_lines(live[path])
+            refreshed.append(
+                RetrievedChunk(path, 1, _line_count(text), text, chunk.symbol_name, chunk.score)
+            )
+            seen.add(path)
+        else:
+            refreshed.append(chunk)
+    extras = [
+        RetrievedChunk(path, 1, _line_count(text), text, None, 0.0)
+        for path, raw in live.items()
+        if path not in seen
+        for text in [_first_lines(raw)]
+    ]
+    refreshed = extras + refreshed
+    context_text, sources = assemble_context(refreshed)
+    return context_text, sources, refreshed
+
+
+def _first_lines(text: str) -> str:
+    lines = text.replace("\r\n", "\n").splitlines()
+    kept = lines[:MAX_OVERLAY_LINES]
+    return "\n".join(kept).strip()
+
+
+def _line_count(text: str) -> int:
+    if not text:
+        return 1
+    return text.count("\n") + 1
+
+
 def merge_hits(hits: list[dict[str, Any]], live: dict[str, str]) -> list[dict[str, Any]]:
     """Working-copy excerpts first. An indexed hit for a dirty path is replaced."""
     refreshed: list[dict[str, Any]] = []

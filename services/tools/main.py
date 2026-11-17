@@ -5,7 +5,8 @@ there is no generic shell/exec passthrough anywhere in this service. An LLM
 decides when to call this service, so every input is treated as hostile:
 paths are re-validated (`handlers/path_safety.py`), preset names are
 allow-listed, and every subprocess is invoked as an argv list with
-`shell=False`.
+`shell=False`. `POST /cancel` does not run a command: it kills the
+process group of the `X-Request-Id` and answers 204.
 
 Configuration is read exclusively from environment variables (no hardcoded
 hosts/ports/paths), per CONTRACTS.md:
@@ -29,7 +30,7 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import FastAPI, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from services.common.metrics import instrument_app
 from services.common.tool_models import (
@@ -40,29 +41,24 @@ from services.common.tool_models import (
     GitDiffArgs,
     GitLogArgs,
     GitShowArgs,
-    ListFilesArgs,
     LspCallsArgs,
     LspOutlineArgs,
-    LspPositionArgs,
-    LspSymbolsArgs,
     LspTypesArgs,
     PathsArgs,
     ReadFileArgs,
-    SearchArgs,
     SvnDiffArgs,
     SvnLogArgs,
     SvnStatusArgs,
     TestArgs,
 )
+from services.tools.cancel_group import begin_http, bind_request_id, end_http, kill_request, reset_request_id
 from services.tools.handlers import (
     build,
     format_check,
     git,
     lint,
-    list_files,
     lsp,
     read_file,
-    search,
     static_analysis,
     svn,
 )
@@ -70,7 +66,7 @@ from services.tools.handlers import (
     compile as compile_handler,
 )
 from services.tools.handlers import test as test_handler
-from services.tools.handlers.path_safety import PathSafetyError
+from services.tools.handlers.path_safety import PathSafetyError, mounted_checkout_root
 
 # --------------------------------------------------------------------------- config (env vars only)
 
@@ -86,19 +82,7 @@ def active_root() -> Path:
 
 def checkout_root_from_header(raw: str) -> Path | None:
     """Accept only `/checkouts/<id>`. Anything else is refused."""
-    text = raw.strip()
-    if not text:
-        return None
-    path = Path(text)
-    if not path.is_absolute():
-        raise ValueError("X-Project-Root must be an absolute path under /checkouts")
-    try:
-        resolved = path.resolve(strict=True)
-    except OSError as exc:
-        raise ValueError("X-Project-Root is not a mounted checkout") from exc
-    if resolved.parent != Path("/checkouts"):
-        raise ValueError("X-Project-Root must be a direct child of /checkouts")
-    return resolved
+    return mounted_checkout_root(raw)
 
 
 BUILD_TIMEOUT_SECONDS = int(os.environ.get("TOOLS_BUILD_TIMEOUT_SECONDS", "14400"))
@@ -110,8 +94,6 @@ DEFAULT_PRESET = os.environ.get("TOOLS_CMAKE_PRESET", "release")
 LINT_TIMEOUT_SECONDS = BUILD_TIMEOUT_SECONDS
 FORMAT_TIMEOUT_SECONDS = BUILD_TIMEOUT_SECONDS
 STATIC_ANALYSIS_TIMEOUT_SECONDS = BUILD_TIMEOUT_SECONDS
-SEARCH_TIMEOUT_SECONDS = BUILD_TIMEOUT_SECONDS
-LIST_FILES_TIMEOUT_SECONDS = BUILD_TIMEOUT_SECONDS
 GIT_TIMEOUT_SECONDS = BUILD_TIMEOUT_SECONDS
 SVN_TIMEOUT_SECONDS = BUILD_TIMEOUT_SECONDS
 COMPILE_TIMEOUT_SECONDS = BUILD_TIMEOUT_SECONDS
@@ -129,7 +111,6 @@ HEALTH_STRICT = os.environ.get("TOOLS_HEALTH_STRICT", "0") == "1"
 BuildRequest = BuildArgs
 TestRequest = TestArgs
 PathsRequest = PathsArgs
-SearchRequest = SearchArgs
 
 
 # --------------------------------------------------------------------------- app + error handling
@@ -139,7 +120,7 @@ instrument_app(app)
 
 
 class _CheckoutRootMiddleware:
-    """Bind X-Project-Root in the same task as the endpoint."""
+    """Bind X-Project-Root and X-Request-Id in the same task as the endpoint."""
 
     def __init__(self, app) -> None:
         self.app = app
@@ -149,21 +130,32 @@ class _CheckoutRootMiddleware:
             await self.app(scope, receive, send)
             return
         raw = ""
+        request_id = ""
+        seen_root = False
         for key, value in scope.get("headers") or []:
-            if key.lower() == b"x-project-root":
+            lowered = key.lower()
+            if lowered == b"x-project-root" and not seen_root:
                 raw = value.decode("utf-8", errors="replace")
-                break
+                seen_root = True
+            elif lowered == b"x-request-id" and not request_id:
+                request_id = value.decode("utf-8", errors="replace").strip()
+        begin_http(request_id)
+        id_token = bind_request_id(request_id)
         try:
-            chosen = checkout_root_from_header(raw)
-        except ValueError as exc:
-            response = JSONResponse(status_code=400, content=_error_body(str(exc)))
-            await response(scope, receive, send)
-            return
-        token = _checkout_root.set(chosen)
-        try:
-            await self.app(scope, receive, send)
+            try:
+                chosen = checkout_root_from_header(raw)
+            except ValueError as exc:
+                response = JSONResponse(status_code=400, content=_error_body(str(exc)))
+                await response(scope, receive, send)
+                return
+            token = _checkout_root.set(chosen)
+            try:
+                await self.app(scope, receive, send)
+            finally:
+                _checkout_root.reset(token)
         finally:
-            _checkout_root.reset(token)
+            reset_request_id(id_token)
+            end_http(request_id)
 
 
 app.add_middleware(_CheckoutRootMiddleware)
@@ -198,7 +190,7 @@ async def _handle_not_a_file(_request: Request, exc: read_file.NotAFileError) ->
 
 @app.exception_handler(FileNotFoundError)
 async def _handle_file_not_found(_request: Request, exc: FileNotFoundError) -> JSONResponse:
-    # Raised by /list-files for a missing directory. (A missing tool binary
+    # Raised by a handler for a missing path. (A missing tool binary
     # also surfaces as FileNotFoundError from subprocess.run - but that one
     # carries an errno; keep the contract simple and report 404 only when
     # the handler raised it deliberately, i.e. without errno.)
@@ -210,7 +202,7 @@ async def _handle_file_not_found(_request: Request, exc: FileNotFoundError) -> J
 @app.exception_handler(ValueError)
 async def _handle_value_error(_request: Request, exc: ValueError) -> JSONResponse:
     # Catches build.PresetValidationError, lint/format/static-analysis's
-    # "empty paths" errors, search.SearchValidationError and
+    # "empty paths" errors and
     # read_file.LineRangeError - all are ValueError subclasses raised before
     # any subprocess runs.
     return JSONResponse(status_code=400, content=_error_body(str(exc)))
@@ -232,6 +224,13 @@ async def _handle_unexpected_error(_request: Request, exc: Exception) -> JSONRes
 # freeze the event loop for the whole build, starving concurrent requests and
 # `/health` (the compose healthcheck would then mark the container unhealthy).
 # `tests/tools/test_routes_non_blocking.py` enforces this.
+
+@app.post("/cancel", status_code=204, response_model=None)
+def cancel(request: Request) -> Response:
+    """Kill the process group of this X-Request-Id. 204 even when none is running."""
+    kill_request(request.headers.get("x-request-id", ""))
+    return Response(status_code=204)
+
 
 @app.get("/health", response_model=None)
 async def health() -> dict | JSONResponse:
@@ -313,32 +312,6 @@ def svn_log_endpoint(request: SvnLogArgs) -> dict:
     )
 
 
-@app.post("/lsp/definition")
-def lsp_definition_endpoint(request: LspPositionArgs) -> dict:
-    return lsp.run_definition(
-        request.path, request.line, request.character, request.preset, active_root(), COMPILE_TIMEOUT_SECONDS
-    )
-
-
-@app.post("/lsp/references")
-def lsp_references_endpoint(request: LspPositionArgs) -> dict:
-    return lsp.run_references(
-        request.path, request.line, request.character, request.preset, active_root(), COMPILE_TIMEOUT_SECONDS
-    )
-
-
-@app.post("/lsp/hover")
-def lsp_hover_endpoint(request: LspPositionArgs) -> dict:
-    return lsp.run_hover(
-        request.path, request.line, request.character, request.preset, active_root(), COMPILE_TIMEOUT_SECONDS
-    )
-
-
-@app.post("/lsp/symbols")
-def lsp_symbols_endpoint(request: LspSymbolsArgs) -> dict:
-    return lsp.run_symbols(request.query, request.preset, active_root(), COMPILE_TIMEOUT_SECONDS)
-
-
 @app.post("/lsp/outline")
 def lsp_outline_endpoint(request: LspOutlineArgs) -> dict:
     return lsp.run_outline(request.path, request.preset, active_root(), COMPILE_TIMEOUT_SECONDS)
@@ -397,21 +370,7 @@ def static_analysis_endpoint(request: PathsRequest) -> dict:
     return static_analysis.run_static_analysis(request.paths, active_root(), STATIC_ANALYSIS_TIMEOUT_SECONDS)
 
 
-@app.post("/search")
-def search_endpoint(request: SearchRequest) -> dict:
-    return search.run_search(
-        request.pattern, request.regex, active_root(), SEARCH_TIMEOUT_SECONDS, max_results=request.max_results
-    )
-
-
 # GET endpoints take the shared model as a *query-string* model (FastAPI >= 0.115).
-@app.get("/list-files")
-def list_files_endpoint(args: Annotated[ListFilesArgs, Query()]) -> dict:
-    return list_files.run_list_files(
-        active_root(), LIST_FILES_TIMEOUT_SECONDS, raw_path=args.path, glob=args.glob, max_results=args.max_results
-    )
-
-
 @app.get("/read-file")
 def read_file_endpoint(args: Annotated[ReadFileArgs, Query()]) -> dict:
     return read_file.run_read_file(args.path, active_root(), start_line=args.start_line, end_line=args.end_line)

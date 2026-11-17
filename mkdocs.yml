@@ -36,35 +36,59 @@ nav:
       - Prerequisites: getting-started/prerequisites.md
       - Installation: getting-started/installation.md
       - First run: getting-started/first-run.md
-  - Architecture:
-      - Overview: architecture/overview.md
-      - Stack presentation (FR): architecture/stack-presentation.md
-      - Roadmap (FR): roadmap.md
-      - Networking: architecture/networking.md
-      - Security: architecture/security.md
   - Concepts:
-      - Without the jargon (FR): concepts/en-clair.md
+      - Without the jargon: concepts/en-clair.md
       - RAG explained: concepts/rag-explained.md
       - Indexing pipeline: concepts/indexing-pipeline.md
       - Tool calling: concepts/tool-calling.md
   - Guides:
       - Using the assistant: guides/using-the-assistant.md
-      - VS Code & Continue (FR): guides/vscode.md
-      - External MCP migration (FR): guides/migration-mcp-externe.md
-      - External libraries roadmap (FR): guides/roadmap-libs-externes.md
-      - Functional checks (FR): guides/prompt-tests-fonctionnels.md
-      - RTX 6000 scenarios (FR): guides/rtx6000-scenarios.md
-      - EVO-X5 deploy (FR): guides/evo-x5.md
-      - Adding a new tool: guides/adding-a-new-tool.md
+      - VS Code and Continue: guides/vscode.md
+      - EVO-X5 deploy: guides/evo-x5.md
       - Reindexing the codebase: guides/reindexing-the-codebase.md
-      - Fine-tuning the codebase: guides/fine-tuning-the-codebase.md
       - Swapping the model: guides/swapping-the-model.md
       - Troubleshooting GPU: guides/troubleshooting-gpu.md
+      - Observability: guides/observability.md
+      - Fine-tuning the codebase: guides/fine-tuning-the-codebase.md
+      - Adding a new tool: guides/adding-a-new-tool.md
       - Testing: guides/testing.md
-      - Retrieval baseline: guides/eval-checkout.md
       - Review fixture: guides/review-fixture.md
-  - Reference:
-      - Agent API: reference/agent-api.md
-      - Tools API: reference/tools-api.md
-      - MCP: reference/mcp.md
-      - Compose services: reference/compose-services.md
+      - External MCP migration: guides/migration-mcp-externe.md
+  - Architecture:
+      - Overview: architecture/overview.md
+      - Networking: architecture/networking.md
+      - Security: architecture/security.md
+      - Agent loop: architecture/agent-loop.md
+      - "ADR 0001: Serena sidecar": adr/0001-serena-sidecar.md
+  - Contract notes:
+      - Index: notes/contracts/index.md
+      - Agent API: notes/contracts/agent-api.md
+      - Tools API: notes/contracts/tools-api.md
+      - MCP: notes/contracts/mcp.md
+      - Compose services: notes/contracts/compose-services.md
+  - Verification notes:
+      - Index: notes/verification/index.md
+      - Functional checks: notes/verification/functional-checks.md
+      - RTX 6000 scenarios: notes/verification/rtx6000-scenarios.md
+      - Retrieval baseline: notes/verification/retrieval-baseline.md
+      - Roadmap: notes/verification/roadmap.md
+      - Agent loop tickets: notes/verification/agent-loop-tickets.md
+      - External libraries: notes/verification/external-libraries.md
+      - Stack presentation: notes/verification/stack-presentation.md
+      - Linux compatibility: notes/verification/linux-compatibility.md
+      - Large repository indexing: notes/verification/indexation-gros-depot.md
+      - Indexer on commit: notes/verification/indexeur-au-commit.md
+      - Settings legibility: notes/verification/settings-comprehensibilite.md
+      - Twenty users on the EVO-X5: notes/verification/evo-x5-modele-20-utilisateurs.md
+      - Qwen and Mistral evaluation: notes/verification/eval-qwen-mistral-deploy.md
+      - One stack, several machines: notes/verification/pumba-serveur-multi-clients.md
+      - Parallel clients: notes/verification/clients-paralleles-manquants.md
+      - Role of the local stack: notes/verification/role-llm-local-harness-multi-machines.md
+      - MCP coverage: notes/verification/mcp-couverture-analyses.md
+      - Existing local harnesses: notes/verification/harnais-locaux-existants.md
+      - The word harness: notes/verification/notion-ai-harness.md
+      - Cursor and Copilot quotas: notes/verification/cursor-vs-copilot-quotas.md
+  - For agents:
+      - Domain docs: agents/domain.md
+      - Issue tracker: agents/issue-tracker.md
+      - Triage labels: agents/triage-labels.md

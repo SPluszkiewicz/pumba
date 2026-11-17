@@ -70,12 +70,16 @@ async def _post_agent(
     path: str,
     body: dict[str, Any],
     *,
+    caller: str = "",
     client: Optional[httpx.AsyncClient] = None,
 ) -> dict[str, Any]:
     token = _bearer()
     if not token:
         raise AgentError("AGENT_BEARER_TOKEN is not set")
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    name = caller.strip()
+    if name:
+        headers["X-Client"] = name
     url = f"{_agent_base_url()}{path}"
     own_client = client is None
     http = client or httpx.AsyncClient(timeout=_timeout())
@@ -113,6 +117,7 @@ async def ask_agent(
     instructions: Optional[str] = None,
     workspace: Optional[str] = None,
     max_reply_tokens: Optional[int] = None,
+    caller: str = "",
     client: Optional[httpx.AsyncClient] = None,
 ) -> dict[str, Any]:
     """POST /chat and return the parsed JSON object."""
@@ -124,18 +129,19 @@ async def ask_agent(
         max_reply_tokens=max_reply_tokens,
         tools=False,
     )
-    return await _post_agent("/chat", body, client=client)
+    return await _post_agent("/chat", body, caller=caller, client=client)
 
 
 async def lookup_agent(
     query: str,
     *,
     workspace: Optional[str] = None,
+    caller: str = "",
     client: Optional[httpx.AsyncClient] = None,
 ) -> dict[str, Any]:
     """POST /lookup. Locations from the index, no chat model."""
     body = _query_body(query, workspace=workspace)
-    return await _post_agent("/lookup", body, client=client)
+    return await _post_agent("/lookup", body, caller=caller, client=client)
 
 
 async def read_agent(

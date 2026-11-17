@@ -1,5 +1,6 @@
 global:
   scrape_interval: 15s
+  evaluation_interval: 15s
 
 scrape_configs:
   - job_name: agent
@@ -9,11 +10,22 @@ scrape_configs:
     static_configs:
       - targets: ["tools:8091"]
   # LLM_ROUTER=1 answers /metrics only when ?model= is the GGUF stem
-  # (basename of LLM_MODEL_PATH, without .gguf).
+  # (basename of LLM_MODEL_PATH, without .gguf). The placeholder is replaced
+  # when the Prometheus container starts. A model loaded later from the page
+  # is a different stem and is not scraped until LLM_MODEL_PATH matches it.
   - job_name: llm
     metrics_path: /metrics
     params:
       model:
-        - Qwen2.5-Coder-14B-Instruct-Q5_K_M
+        - __LLM_METRICS_MODEL__
     static_configs:
       - targets: ["llm:8080"]
+  - job_name: embedder
+    static_configs:
+      - targets: ["embedder:8081"]
+  - job_name: reranker
+    static_configs:
+      - targets: ["reranker:8082"]
+  - job_name: qdrant
+    static_configs:
+      - targets: ["qdrant:6333"]

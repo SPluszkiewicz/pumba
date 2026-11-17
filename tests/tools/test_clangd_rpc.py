@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 import threading
 
@@ -14,7 +15,7 @@ from services.tools.handlers.clangd_rpc import (
     format_locations,
     format_related_symbols,
 )
-from services.tools.handlers.lsp import run_definition
+from services.tools.handlers.lsp import _prime_compile_units, run_outline
 
 
 def test_reader_returns_each_framed_message() -> None:
@@ -128,7 +129,7 @@ def test_format_related_symbols_keeps_only_the_checkout() -> None:
     assert "other" not in text
 
 
-def test_run_definition_uses_the_session(tmp_path, monkeypatch) -> None:
+def test_run_outline_uses_the_session(tmp_path, monkeypatch) -> None:
     source = tmp_path / "src"
     source.mkdir()
     header = source / "a.hpp"
@@ -141,11 +142,35 @@ def test_run_definition_uses_the_session(tmp_path, monkeypatch) -> None:
             assert method == "textDocument/didOpen"
 
         def request(self, method: str, params: dict) -> list:
-            assert method == "textDocument/definition"
-            assert params["position"] == {"line": 0, "character": 7}
-            return [{"uri": header.resolve().as_uri(), "range": {"start": {"line": 0, "character": 7}}}]
+            assert method == "textDocument/documentSymbol"
+            assert params["textDocument"]["uri"] == header.resolve().as_uri()
+            return [{"name": "Widget", "kind": 23, "range": {"start": {"line": 0}}}]
 
     monkeypatch.setattr("services.tools.handlers.lsp._session", lambda *args, **kwargs: FakeSession())
-    body = run_definition("src/a.hpp", 1, 8, "release", tmp_path, 30)
+    body = run_outline("src/a.hpp", "release", tmp_path, 30)
     assert body["ok"] is True
-    assert "src/a.hpp:1:8" in body["stdout"]
+    assert "Widget" in body["stdout"]
+
+
+def test_prime_opens_at_most_sixteen_units(tmp_path, monkeypatch) -> None:
+    src = tmp_path / "src"
+    src.mkdir()
+    entries = []
+    for i in range(20):
+        path = src / f"f{i}.cpp"
+        path.write_text(f"int f{i}() {{ return {i}; }}\n", encoding="utf-8")
+        entries.append({"directory": str(tmp_path), "command": "c++", "file": str(path)})
+    (tmp_path / "compile_commands.json").write_text(json.dumps(entries), encoding="utf-8")
+    monkeypatch.setattr("services.tools.handlers.lsp.time.sleep", lambda _s: None)
+
+    class _Session:
+        opened_docs: dict[str, int] = {}
+        opened = 0
+
+        def notify(self, method: str, params: object) -> None:
+            assert method == "textDocument/didOpen"
+            self.opened += 1
+
+    session = _Session()
+    _prime_compile_units(session, tmp_path / "compile_commands.json", tmp_path)
+    assert session.opened == 16

@@ -22,12 +22,13 @@ from starlette.responses import JSONResponse
 
 MCP_PORT = int(os.getenv("MCP_PORT", "8092"))
 workspace_header: ContextVar[str] = ContextVar("workspace_header", default="")
+client_header: ContextVar[str] = ContextVar("client_header", default="")
 
 mcp = FastMCP(
     MCP_SERVER,
     instructions=(
         "Tools for the checkout named by X-Workspace. "
-        "lookup, check, outline, calls, and types return facts and must be used for those jobs. "
+        "lookup, check, calls, and types return facts and must be used for those jobs. "
         "ask only judges text already retrieved. It does not search, build, test, compile, or list symbols. "
         "Paste each tool result unchanged."
     ),
@@ -54,6 +55,10 @@ def _workspace() -> str:
     return workspace_header.get() or os.getenv("MCP_WORKSPACE", "")
 
 
+def _caller() -> str:
+    return client_header.get().strip()
+
+
 def _tool_error(exc: AgentError) -> ToolError:
     return ToolError(str(exc))
 
@@ -66,7 +71,7 @@ async def lookup(query: str) -> str:
     No chat model and no opinion. Paste the result unchanged.
     """
     try:
-        payload = await lookup_agent(query, workspace=_workspace())
+        payload = await lookup_agent(query, workspace=_workspace(), caller=_caller())
     except AgentError as exc:
         raise _tool_error(exc) from exc
     return format_lookup(payload)
@@ -90,20 +95,6 @@ async def check(action: str, path: str = "", preset: str = "", filter: str = "")
     except AgentError as exc:
         raise _tool_error(exc) from exc
     return format_check(payload)
-
-
-@mcp.tool()
-async def outline(path: str) -> str:
-    """List symbols declared in one file via clangd.
-
-    path is repo-relative. Each line is a name, a kind, and a line number.
-    Paste the result unchanged.
-    """
-    try:
-        payload = await lsp_fact_agent(path, route="/lsp/outline", workspace=_workspace())
-    except AgentError as exc:
-        raise _tool_error(exc) from exc
-    return format_fact(payload)
 
 
 @mcp.tool()
@@ -163,6 +154,7 @@ async def ask(query: str, conversation_id: str = "") -> str:
             instructions=_ASK_NOTE,
             workspace=_workspace(),
             max_reply_tokens=400,
+            caller=_caller(),
         )
     except AgentError as exc:
         raise _tool_error(exc) from exc

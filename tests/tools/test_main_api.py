@@ -57,30 +57,22 @@ class TestReadFile:
         assert resp.status_code == 400
 
 
-class TestListFiles:
-    def test_missing_dir_is_404(self, client: TestClient) -> None:
-        resp = client.get("/list-files", params={"path": "does-not-exist"})
+class TestRetiredRoutes:
+    @pytest.mark.parametrize(
+        ("method", "path", "kwargs"),
+        [
+            ("post", "/search", {"json": {"pattern": "x"}}),
+            ("get", "/list-files", {}),
+            ("post", "/lsp/definition", {"json": {"path": "src/main.cpp", "line": 1, "character": 1}}),
+            ("post", "/lsp/references", {"json": {"path": "src/main.cpp", "line": 1, "character": 1}}),
+            ("post", "/lsp/hover", {"json": {"path": "src/main.cpp", "line": 1, "character": 1}}),
+            ("post", "/lsp/symbols", {"json": {"query": "Widget"}}),
+        ],
+    )
+    def test_route_is_absent(self, client: TestClient, method: str, path: str, kwargs: dict) -> None:
+        resp = getattr(client, method)(path, **kwargs)
         assert resp.status_code == 404
-        assert resp.json()["ok"] is False
-
-    def test_file_instead_of_dir_is_400(self, client: TestClient) -> None:
-        resp = client.get("/list-files", params={"path": "src/main.cpp"})
-        assert resp.status_code == 400
-
-    def test_max_results_above_cap_is_422(self, client: TestClient) -> None:
-        resp = client.get("/list-files", params={"max_results": 99_999})
-        assert resp.status_code == 422
-
-
-class TestSearchRequestModel:
-    def test_max_results_above_hard_cap_is_422(self, client: TestClient) -> None:
-        resp = client.post("/search", json={"pattern": "x", "max_results": 10_000})
-        assert resp.status_code == 422
-
-    def test_max_results_defaults(self, client: TestClient) -> None:
-        req = tools_main.SearchRequest(pattern="x")
-        assert req.max_results == tools_main.search.DEFAULT_MAX_RESULTS
-        assert req.regex is False
+        assert resp.json()["detail"] == "Not Found"
 
 
 class TestCompileAndGitHttp:

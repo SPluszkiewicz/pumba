@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-
 import main
 import pytest
 from fastapi.testclient import TestClient
@@ -11,8 +9,7 @@ from fastapi.testclient import TestClient
 
 def test_chat_returns_503_when_slots_are_full(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AGENT_BEARER_TOKEN", "secret-token")
-    # Zero remaining slots: locked() is True, /chat must 503 without touching LLM.
-    monkeypatch.setattr(main, "_CHAT_SLOTS", asyncio.Semaphore(0))
+    monkeypatch.setattr(main, "_CHAT_SLOTS", main._SlotGate(0))
 
     with TestClient(main.app) as client:
         resp = client.post(

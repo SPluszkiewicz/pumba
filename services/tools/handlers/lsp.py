@@ -1,4 +1,4 @@
-"""clangd queries: definition, references, hover, workspace symbols.
+"""clangd queries: outline, call hierarchy, and type hierarchy.
 
 clangd runs inside `tools`. It prefers a `compile_commands.json` already
 in the checkout (`build/`, `out/`, or a `build*` directory). Host paths in
@@ -14,25 +14,18 @@ import shutil
 import threading
 import time
 from pathlib import Path
-from typing import Any, Optional
 
 from services.tools.handlers.build import ensure_configured, root_cache_key, scratch_base
 from services.tools.handlers.clangd_rpc import (
-    MAX_LOCATIONS,
     ClangdError,
     ClangdSession,
     format_document_symbols,
-    format_locations,
     format_related_symbols,
 )
 from services.tools.handlers.compdb import find_compile_commands, prepare_compile_commands
 from services.tools.handlers.path_safety import validate_path
 
 __all__ = [
-    "run_definition",
-    "run_references",
-    "run_hover",
-    "run_symbols",
     "run_outline",
     "run_calls",
     "run_types",
@@ -40,7 +33,6 @@ __all__ = [
 ]
 
 _MAX_FILE_BYTES = 256 * 1024
-_HOVER_MAX_CHARS = 4000
 _sessions: dict[str, ClangdSession] = {}
 _sessions_lock = threading.Lock()
 
@@ -55,44 +47,6 @@ def reset_sessions() -> None:
         for session in _sessions.values():
             session.close()
         _sessions.clear()
-
-
-def run_definition(path: str, line: int, character: int, preset: str, project_root: Path, timeout: int) -> dict:
-    return _position("textDocument/definition", path, line, character, preset, project_root, timeout)
-
-
-def run_references(path: str, line: int, character: int, preset: str, project_root: Path, timeout: int) -> dict:
-    extra = {"context": {"includeDeclaration": True}}
-    return _position("textDocument/references", path, line, character, preset, project_root, timeout, extra=extra)
-
-
-def run_hover(path: str, line: int, character: int, preset: str, project_root: Path, timeout: int) -> dict:
-    opened = _open(path, line, character, preset, project_root, timeout)
-    if "ok" in opened and opened.get("ok") is False:
-        return opened
-    session, uri = opened
-    try:
-        result = session.request(
-            "textDocument/hover",
-            {"textDocument": {"uri": uri}, "position": {"line": line - 1, "character": character - 1}},
-        )
-    except ClangdError as exc:
-        return _fail(str(exc))
-    full = _hover_text(result)
-    text = full[:_HOVER_MAX_CHARS]
-    return {"ok": True, "stdout": text, "stderr": "", "exit_code": 0, "truncated": len(full) > _HOVER_MAX_CHARS}
-
-
-def run_symbols(query: str, preset: str, project_root: Path, timeout: int) -> dict:
-    session = _session(preset, project_root, timeout)
-    if isinstance(session, dict):
-        return session
-    try:
-        result = session.request("workspace/symbol", {"query": query})
-    except ClangdError as exc:
-        return _fail(str(exc))
-    text, truncated = format_locations(result, _uri_prefix(project_root), limit=MAX_LOCATIONS)
-    return {"ok": True, "stdout": text, "stderr": "", "exit_code": 0, "truncated": truncated}
 
 
 def run_outline(path: str, preset: str, project_root: Path, timeout: int) -> dict:
@@ -215,34 +169,6 @@ def _hierarchy(
     except ClangdError as exc:
         return _fail(str(exc))
     return {"ok": True, "stdout": "\n".join(parts), "stderr": "", "exit_code": 0, "truncated": truncated}
-
-
-def _position(
-    method: str,
-    path: str,
-    line: int,
-    character: int,
-    preset: str,
-    project_root: Path,
-    timeout: int,
-    extra: Optional[dict[str, Any]] = None,
-) -> dict:
-    opened = _open(path, line, character, preset, project_root, timeout)
-    if isinstance(opened, dict):
-        return opened
-    session, uri = opened
-    params: dict[str, Any] = {
-        "textDocument": {"uri": uri},
-        "position": {"line": line - 1, "character": character - 1},
-    }
-    if extra:
-        params.update(extra)
-    try:
-        result = session.request(method, params)
-    except ClangdError as exc:
-        return _fail(str(exc))
-    text, truncated = format_locations(result, _uri_prefix(project_root))
-    return {"ok": True, "stdout": text, "stderr": "", "exit_code": 0, "truncated": truncated}
 
 
 def _open(path: str, line: int, character: int, preset: str, project_root: Path, timeout: int):
@@ -368,10 +294,12 @@ def _prime_compile_units(session: ClangdSession, compdb_path: Path, project_root
         entries = json.loads(compdb_path.read_text(encoding="utf-8", errors="replace"))
     except (OSError, ValueError):
         return
-    if not isinstance(entries, list) or len(entries) > 16:
+    if not isinstance(entries, list):
         return
     primed = 0
     for entry in entries:
+        if primed >= 16:
+            break
         if not isinstance(entry, dict):
             continue
         raw_file = entry.get("file")
@@ -401,25 +329,6 @@ def _prime_compile_units(session: ClangdSession, compdb_path: Path, project_root
 
 def _uri_prefix(project_root: Path) -> str:
     return project_root.resolve().as_uri().rstrip("/") + "/"
-
-
-def _hover_text(result: Any) -> str:
-    if not isinstance(result, dict):
-        return ""
-    contents = result.get("contents")
-    if isinstance(contents, str):
-        return contents
-    if isinstance(contents, dict):
-        return str(contents.get("value") or "")
-    if isinstance(contents, list):
-        parts = []
-        for item in contents:
-            if isinstance(item, str):
-                parts.append(item)
-            elif isinstance(item, dict):
-                parts.append(str(item.get("value") or ""))
-        return "\n".join(parts)
-    return ""
 
 
 def _fail(message: str) -> dict:

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Sample post-commit hook for CODEBASE_PATH (install with scripts/install_train_hook.py).
+# Sample post-commit hook for CODEBASE_PATH (install with scripts/host/install_train_hook.py).
 # Runs incremental QLoRA training after each commit when WSL local-llm is available.
 set -eu
 

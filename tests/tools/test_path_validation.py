@@ -22,7 +22,11 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from services.tools.handlers.path_safety import PathSafetyError, validate_path  # noqa: E402
+from services.tools.handlers.path_safety import (  # noqa: E402
+    PathSafetyError,
+    mounted_checkout_root,
+    validate_path,
+)
 
 
 @pytest.fixture()
@@ -200,3 +204,13 @@ class TestAcceptsValidPaths:
         root_resolved = project_root.resolve()
         resolved = validate_path("src/main.cpp", project_root)
         assert resolved.is_relative_to(root_resolved)
+
+
+def test_mounted_checkout_root_rejects_relative_and_other_absolute_dirs(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="absolute"):
+        mounted_checkout_root("co_1")
+    with pytest.raises(ValueError, match="absolute"):
+        mounted_checkout_root("../etc/passwd")
+    assert mounted_checkout_root("") is None
+    with pytest.raises(ValueError, match="direct child"):
+        mounted_checkout_root(str(tmp_path.resolve()))
