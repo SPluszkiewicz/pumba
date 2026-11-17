@@ -90,7 +90,12 @@ jobs:
       - name: pytest (all unit suites; integration smoke excluded)
         # Profile campaign (scripts/host/profile_campaign.py) needs the RTX 6000
         # stack. It is not a CI job.
-        run: python -m pytest -q --ignore=tests/integration
+        # Serena policy only accepts a direct child of /checkouts. The runner
+        # cannot create that directory; the fixtures only add and remove children.
+        run: |
+          sudo mkdir -p /checkouts
+          sudo chmod 777 /checkouts
+          python -m pytest -q --ignore=tests/integration
 
       - name: clang-format check (app/ and sample/)
         run: |
