@@ -54,6 +54,10 @@ UI_PROXY_BASE_URL = os.environ.get("UI_PROXY_BASE_URL", "http://ui-proxy:8090")
 HEALTH_TIMEOUT_SECONDS = 180
 HEALTH_POLL_INTERVAL_SECONDS = 3
 CHAT_TIMEOUT_SECONDS = 120
+# The tool-call turn may run several builds. Each one can consume the
+# agent's request timeout before the loop moves on, so this has to outlive
+# the whole turn, not one HTTP call.
+TOOL_CALL_TIMEOUT_SECONDS = 600
 
 
 def _wait_until_healthy(name: str, url: str) -> None:
@@ -97,7 +101,12 @@ def wait_for_stack() -> None:
     _wait_until_healthy("ui-proxy", f"{UI_PROXY_BASE_URL}/health")
 
 
-def _chat(query: str, *, token: str | None = AGENT_BEARER_TOKEN) -> httpx.Response:
+def _chat(
+    query: str,
+    *,
+    token: str | None = AGENT_BEARER_TOKEN,
+    timeout: float = CHAT_TIMEOUT_SECONDS,
+) -> httpx.Response:
     headers = {"Content-Type": "application/json"}
     if token is not None:
         headers["Authorization"] = f"Bearer {token}"
@@ -105,7 +114,7 @@ def _chat(query: str, *, token: str | None = AGENT_BEARER_TOKEN) -> httpx.Respon
         f"{AGENT_BASE_URL}/chat",
         json={"query": query},
         headers=headers,
-        timeout=CHAT_TIMEOUT_SECONDS,
+        timeout=timeout,
     )
 
 
@@ -223,7 +232,10 @@ def test_tool_call_round_trip() -> None:
     `tool_calls` list here is not treated as a failure - only a request
     that errors out is.
     """
-    resp = _chat("Please build the C++ project with the release preset and tell me if it succeeds.")
+    resp = _chat(
+        "Please build the C++ project with the release preset and tell me if it succeeds.",
+        timeout=TOOL_CALL_TIMEOUT_SECONDS,
+    )
     assert resp.status_code == 200, resp.text
 
     body = resp.json()
