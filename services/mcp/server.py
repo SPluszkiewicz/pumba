@@ -16,9 +16,10 @@ from agent_client import (
 )
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
-from product import MCP_SERVER
 from starlette.requests import Request
 from starlette.responses import JSONResponse
+
+from product import MCP_SERVER
 
 MCP_PORT = int(os.getenv("MCP_PORT", "8092"))
 workspace_header: ContextVar[str] = ContextVar("workspace_header", default="")

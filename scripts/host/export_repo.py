@@ -14,8 +14,8 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from repo import ROOT as REPO_ROOT
 import product
+from repo import ROOT as REPO_ROOT
 
 ARCHIVE_ROOT = product.ARCHIVE_ROOT
 DEFAULT_OUT = REPO_ROOT / f"{ARCHIVE_ROOT}-export.zip"

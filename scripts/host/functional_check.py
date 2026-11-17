@@ -355,7 +355,13 @@ def run_functional_checks(
                 workspace=workspace,
             )
             tools = (listed.get("result") or {}).get("tools") or []
-            names = {t.get("name") for t in tools if isinstance(t, dict)}
+            names: set[str] = set()
+            for tool in tools:
+                if not isinstance(tool, dict):
+                    continue
+                name = tool.get("name")
+                if isinstance(name, str):
+                    names.add(name)
             expected = {"lookup", "check", "calls", "types", "ask"}
 
             def _call_mcp(req_id: int, tool_name: str, arguments: dict[str, Any]) -> str:
@@ -529,7 +535,7 @@ def run_functional_checks(
                 )
                 resp.raise_for_status()
                 hits = resp.json().get("hits") or []
-                dirty_hit = next(
+                dirty_hit: dict[str, Any] = next(
                     (h for h in hits if h.get("file_path") == "src/calculator.hpp"),
                     {},
                 )

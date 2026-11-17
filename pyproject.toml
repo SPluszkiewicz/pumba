@@ -19,11 +19,15 @@ select = ["E", "F", "W", "B", "I"]
 ignore = [
     # `zip(strict=...)` is enforced only where lengths must match (indexer);
     # elsewhere the flag is noise.
+    "B905",
 ]
 
 [tool.ruff.lint.per-file-ignores]
 # Tests sys.path-hack before importing the module under test.
 "tests/**" = ["E402"]
+# Slide script: `from deck_lib import *` is the layout DSL, and the copy
+# runs past the code line limit.
+"presentations/build_deck.py" = ["F405", "E501"]
 
 [tool.ruff.lint.isort]
 known-first-party = [

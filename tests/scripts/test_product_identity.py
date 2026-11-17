@@ -4,11 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import deploy
 import export_repo
 import product
 import workspaces
-
-import deploy
 
 REPO = Path(__file__).resolve().parents[2]
 

@@ -179,8 +179,11 @@ def _stop_host_llm() -> None:
             capture_output=True,
         )
         return
+    # POSIX only. The server was started with start_new_session, so the pid is the group id.
+    # getattr keeps this type-checking on Windows, where os.killpg is absent.
+    kill_group = getattr(os, "killpg", os.kill)
     try:
-        os.killpg(pid, signal.SIGTERM)
+        kill_group(pid, signal.SIGTERM)
     except (ProcessLookupError, PermissionError, OSError):
         try:
             os.kill(pid, signal.SIGTERM)

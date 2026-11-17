@@ -107,7 +107,8 @@ def _equals_filter(**fields: str) -> Filter:
 
 
 def _paths_filter(paths: Sequence[str], git_blob_hash: str | None = None) -> Filter:
-    must: list[FieldCondition] = [FieldCondition(key="file_path", match=MatchAny(any=list(paths)))]
+    # `list[FieldCondition]` is not a `list[Condition]`: qdrant's `must` is invariant.
+    must: list[Any] = [FieldCondition(key="file_path", match=MatchAny(any=list(paths)))]
     if git_blob_hash:
         must.append(FieldCondition(key="git_blob_hash", match=MatchValue(value=git_blob_hash)))
     return Filter(must=must)
@@ -223,11 +224,11 @@ class VectorStore:
         groups: dict[tuple[str, ...], list[Any]] = {}
         for pid, owners in updates.items():
             groups.setdefault(tuple(owners), []).append(pid)
-        for owners, pids in groups.items():
+        for owner_key, pids in groups.items():
             for start in range(0, len(pids), _WRITE_BATCH):
                 self.client.set_payload(
                     collection_name=self.collection,
-                    payload={"checkouts": list(owners)},
+                    payload={"checkouts": list(owner_key)},
                     points=pids[start : start + _WRITE_BATCH],
                 )
         return len(updates)
@@ -345,8 +346,9 @@ class VectorStore:
         else:
             for record in self._scroll(["file_path", "git_blob_hash", "checkouts"]):
                 payload = record.payload or {}
-                pair = (payload.get("file_path"), str(payload.get("git_blob_hash") or ""))
-                if pair in wanted:
+                file_path = payload.get("file_path")
+                blob_hash = str(payload.get("git_blob_hash") or "")
+                if isinstance(file_path, str) and (file_path, blob_hash) in wanted:
                     _consider(record.id, _owners(payload))
         return self._set_checkouts(updates)
 

@@ -19,8 +19,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
-from repo import ROOT as REPO_ROOT
 import product
+from repo import ROOT as REPO_ROOT
 
 REGISTRY_PATH = REPO_ROOT / "state" / "workspaces.json"
 COMPOSE_MOUNTS = REPO_ROOT / "state" / "compose.workspaces.yaml"

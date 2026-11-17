@@ -225,7 +225,10 @@ class ReadFileArgs(ToolArgs):
     )
     end_line: int | None = Field(
         default=None,
-        description="The 0-based index of the last line to retrieve, inclusive. Empty reads through the end of the file.",
+        description=(
+            "The 0-based index of the last line to retrieve, inclusive. "
+            "Empty reads through the end of the file."
+        ),
     )
     max_answer_chars: int = Field(
         default=-1,

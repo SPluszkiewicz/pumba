@@ -46,6 +46,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from gate import decide
 from llm_client import active_model
+from local_files import bind_caller, current_caller, publish, published, reset_caller, slice_local
 from model_catalog import fetch_models, select_model
 from prompts import (
     DIRECT_SYSTEM_PROMPT,
@@ -61,7 +62,6 @@ from review import review_change
 from scope import active_checkout_id, project_root_header, qdrant_collection
 from tool_loop import TOOLS_BASE_URL, EventCallback, run_tool_loop
 from turns import TURNS, TurnBusy, TurnCancelled
-from local_files import bind_caller, current_caller, publish, published, reset_caller, slice_local
 from working_copy import chunks_with_live, merge_hits, overlay_chunks, overlay_hits
 
 AGENT_BEARER_TOKEN = os.getenv("AGENT_BEARER_TOKEN", "")
@@ -760,10 +760,10 @@ async def execute_turn(
         _CANCEL_STATE.reset(token)
 
 
-def _detach(task: asyncio.Future[object]) -> None:
+def _detach(task: asyncio.Future[Any]) -> None:
     """Drop a tool HTTP without waiting for it. The result is not a returned call."""
 
-    def _done(fut: asyncio.Future[object]) -> None:
+    def _done(fut: asyncio.Future[Any]) -> None:
         if not fut.cancelled():
             fut.exception()
 

@@ -72,8 +72,8 @@ def test_missing_server_is_installed_from_the_pinned_vulkan_release(tmp_path, mo
         payload = _packed(kind, binary_name)
         seen: list[str] = []
 
-        def opener(url: str, _payload: bytes = payload) -> io.BytesIO:
-            seen.append(url)
+        def opener(url: str, _payload: bytes = payload, _seen: list[str] = seen) -> io.BytesIO:
+            _seen.append(url)
             return io.BytesIO(_payload)
 
         cache = tmp_path / system

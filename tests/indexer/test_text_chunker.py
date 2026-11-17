@@ -6,7 +6,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 import text_chunker
 
 BLOB = "0" * 40

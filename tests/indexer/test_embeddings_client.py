@@ -9,10 +9,9 @@ from __future__ import annotations
 import json
 from typing import Any, Callable, Optional
 
+import embeddings_client
 import httpx
 import pytest
-
-import embeddings_client
 from embeddings_client import EmbedderRequestError, embed_texts  # noqa: E402
 
 

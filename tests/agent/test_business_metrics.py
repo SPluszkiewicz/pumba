@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from prometheus_client import generate_latest
-
 from common.metrics import (
     observe_chat_rejected,
     observe_chat_slots,
@@ -15,6 +13,7 @@ from common.metrics import (
     observe_turn,
     set_chat_slot_limit,
 )
+from prometheus_client import generate_latest
 
 
 def test_turn_rag_and_tool_series_are_exported() -> None:
