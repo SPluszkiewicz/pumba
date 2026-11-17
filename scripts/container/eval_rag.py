@@ -56,10 +56,10 @@ def load_fixture(path: Path) -> list[GoldenQuestion]:
 
 
 def call_chat(query: str) -> dict:
-    # Retrieval is what this check scores. Leaving tools on lets the tiny CI
-    # model start a cmake build, which holds a /chat slot until the client
-    # gives up and the next question gets 503.
-    body = json.dumps({"query": query, "tools": False}).encode("utf-8")
+    # Retrieval is what this check scores. Tools stay off so the tiny CI model
+    # cannot start a cmake build and hold a /chat slot. The reply cap keeps a
+    # CPU completion from running until this client's timeout.
+    body = json.dumps({"query": query, "tools": False, "max_reply_tokens": 32}).encode("utf-8")
     request = urllib.request.Request(
         f"{AGENT_BASE_URL}/chat",
         data=body,
@@ -69,7 +69,7 @@ def call_chat(query: str) -> dict:
             "Authorization": f"Bearer {AGENT_BEARER_TOKEN}",
         },
     )
-    with urllib.request.urlopen(request, timeout=120) as response:
+    with urllib.request.urlopen(request, timeout=180) as response:
         return json.loads(response.read().decode("utf-8"))
 
 
