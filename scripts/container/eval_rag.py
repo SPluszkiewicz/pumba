@@ -56,7 +56,10 @@ def load_fixture(path: Path) -> list[GoldenQuestion]:
 
 
 def call_chat(query: str) -> dict:
-    body = json.dumps({"query": query}).encode("utf-8")
+    # Retrieval is what this check scores. Leaving tools on lets the tiny CI
+    # model start a cmake build, which holds a /chat slot until the client
+    # gives up and the next question gets 503.
+    body = json.dumps({"query": query, "tools": False}).encode("utf-8")
     request = urllib.request.Request(
         f"{AGENT_BASE_URL}/chat",
         data=body,
