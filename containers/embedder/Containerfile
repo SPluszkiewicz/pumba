@@ -51,6 +51,11 @@ ENV LIBRARY_PATH=/usr/local/cuda/lib64/stubs
 # llama.cpp checkout pinned per CONTRACTS.md - do not bump without updating that file too.
 RUN git clone --branch b10216 --depth 1 https://github.com/ggml-org/llama.cpp
 
+# A depth-1 clone reports build number 1, so llama.cpp asks the HF bucket for
+# the "b1" UI and then falls back to "latest", whose assets do not match this
+# tag's embedder (missing workbox[hash].js). Pin the UI to the same tag.
+ENV HF_UI_VERSION=b10216
+
 RUN set -eux; \
     CMAKE_EXTRA=""; \
     if [ "$GPU" = "1" ]; then \
