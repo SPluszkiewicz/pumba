@@ -130,7 +130,8 @@ def _start_host_llm(*, timeout: int = 300, wait: bool = True) -> None:
     log = log_path.open("ab")
     kwargs: dict[str, Any] = {}
     if os.name == "nt":
-        kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        # Missing from the Linux stubs. This branch only runs on Windows.
+        kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)  # noqa: B009
     else:
         kwargs["start_new_session"] = True
     import evo_x5_serve as serve

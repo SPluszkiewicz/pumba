@@ -172,7 +172,9 @@ def _win32():  # noqa: ANN202 - WinDLL only exists on Windows
             ("szExeFile", wintypes.WCHAR * 260),
         ]
 
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    # WinDLL is absent from the Linux stubs. The tools image is Linux and never calls this.
+    win_dll = getattr(ctypes, "WinDLL")  # noqa: B009
+    kernel32 = win_dll("kernel32", use_last_error=True)
     pointer = ctypes.POINTER(_PROCESSENTRY32W)
     kernel32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
     kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
