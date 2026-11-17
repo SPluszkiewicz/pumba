@@ -183,7 +183,13 @@ jobs:
           key: test-models-${{ hashFiles('scripts/container/fetch_models.py') }}
 
       - name: End-to-end smoke test (deploy.py test == docs/guides/testing.md)
-        run: python scripts/deploy.py test
+        # Rootless Podman shows the runner's files as root inside the
+        # container. The image runs as `dev`, so the bind mounts must be
+        # writable by that user or fetch-models cannot create its cache.
+        run: |
+          mkdir -p models state
+          chmod -R a+rwX .
+          python scripts/deploy.py test
 
       - name: RAG golden-question eval
         # deploy.py test tears the stack down; bring the core back up with the
