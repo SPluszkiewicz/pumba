@@ -40,7 +40,7 @@ TOOLING_PACKAGES = (
     "ruff==0.14.10",
     "mypy==1.19.1",
     "pyyaml",
-    "huggingface_hub",
+    "huggingface_hub==2.4.0",
 )
 
 

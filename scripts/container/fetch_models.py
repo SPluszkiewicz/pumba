@@ -285,7 +285,6 @@ def fetch_hf_train_base(*, force: bool) -> None:
     snapshot_download(
         repo_id=HF_TRAIN_BASE_REPO,
         local_dir=str(destination),
-        local_dir_use_symlinks=False,
     )
     if not marker.exists():
         raise RuntimeError(f"HF download finished but {marker} is missing")

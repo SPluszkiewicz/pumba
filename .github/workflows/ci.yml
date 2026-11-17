@@ -64,7 +64,7 @@ jobs:
           # Pins match scripts/host/install_deps.py TOOLING_PACKAGES.
           # pytest-asyncio is required by pytest.ini (`asyncio_mode = auto`).
           pip install pytest==8.3.4 pytest-asyncio==0.25.2 \
-                      ruff==0.14.10 mypy==1.19.1 pyyaml huggingface_hub
+                      ruff==0.14.10 mypy==1.19.1 pyyaml huggingface_hub==2.4.0
 
       - name: ruff
         run: ruff check .
