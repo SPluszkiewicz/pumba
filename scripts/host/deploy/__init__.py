@@ -12,8 +12,11 @@ import time
 from pathlib import Path
 from typing import Literal
 
-import product
+# isort: off
+# `repo` puts services/common on sys.path. `product` is not importable before that.
 from repo import ROOT as REPO_ROOT
+import product
+# isort: on
 
 ENV_FILE = REPO_ROOT / ".env"
 HOST_LLM_PID = REPO_ROOT / "state" / "host-llm.pid"

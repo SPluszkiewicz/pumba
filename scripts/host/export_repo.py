@@ -14,8 +14,11 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-import product
+# isort: off
+# `repo` puts services/common on sys.path. `product` is not importable before that.
 from repo import ROOT as REPO_ROOT
+import product
+# isort: on
 
 ARCHIVE_ROOT = product.ARCHIVE_ROOT
 DEFAULT_OUT = REPO_ROOT / f"{ARCHIVE_ROOT}-export.zip"

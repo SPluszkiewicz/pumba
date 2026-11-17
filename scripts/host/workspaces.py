@@ -19,8 +19,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
-import product
+# isort: off
+# `repo` puts services/common on sys.path. `product` is not importable before that.
 from repo import ROOT as REPO_ROOT
+import product
+# isort: on
 
 REGISTRY_PATH = REPO_ROOT / "state" / "workspaces.json"
 COMPOSE_MOUNTS = REPO_ROOT / "state" / "compose.workspaces.yaml"
